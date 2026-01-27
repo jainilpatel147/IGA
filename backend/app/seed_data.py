@@ -7,7 +7,9 @@ from sqlalchemy.orm import Session
 from app.database import SessionLocal
 from app.models.application import Application
 from app.models.entitlement import Entitlement
-from app.models.governance_evidence import ControlMapping
+from app.models.governance_evidence import GovernanceEvidence, ControlMapping
+from app.models.application_assignment import ApplicationAssignment
+from app.models.access_request import AccessRequest
 from app.services.audit import AuditService
 
 
