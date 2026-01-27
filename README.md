@@ -1,117 +1,97 @@
-# IGA Platform - Real Adoption Guide
+# IGA Platform
 
-## Architecture
+Identity Governance & Administration Platform
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        IGA Platform                             │
-│  ┌─────────────┐   ┌─────────────┐   ┌─────────────────────┐   │
-│  │   Identity  │   │   Access    │   │   Governance        │   │
-│  │  Management │   │   Requests  │   │   Evidence          │   │
-│  └─────────────┘   └─────────────┘   └─────────────────────┘   │
-│                                              ▲                  │
-│  Roles: admin, user                          │ API              │
-└──────────────────────────────────────────────┼──────────────────┘
-                                               │
-                    ┌──────────────────────────┼──────────────────┐
-                    │         GRC Platform     │                  │
-                    │   (Registered as App)    ▼                  │
-                    │  ┌────────────────────────────────────┐     │
-                    │  │  Entitlements (IGA-managed):       │     │
-                    │  │  • Compliance Officer              │     │
-                    │  │  • Auditor                         │     │
-                    │  │  • Reviewer                        │     │
-                    │  └────────────────────────────────────┘     │
-                    │  Consumes: /grc/evidence, /grc/approvals   │
-                    └─────────────────────────────────────────────┘
+## Quick Start with Docker
+
+### Prerequisites
+- Docker & Docker Compose installed
+
+### Run with One Command
+
+```bash
+# Clone the repo
+git clone https://github.com/jainilpatel147/IGA.git
+cd IGA
+
+# Copy environment file
+cp .env.example .env
+
+# Start all services
+docker-compose up -d
 ```
 
----
+### Access
+- **Frontend**: http://localhost
+- **Backend API**: http://localhost:8000
+- **API Docs**: http://localhost:8000/docs
 
-## IGA Roles (Simple)
-
-| Role | Purpose |
-|------|---------|
-| **admin** | Full IGA management - apps, identities, connectors |
-| **user** | Request access, view own access |
-
----
-
-## GRC as an Application
-
-GRC is registered as an **application** in IGA with these entitlements:
-
-| Entitlement | Purpose |
-|-------------|---------|
-| **Compliance Officer** | Full GRC access, manage reviews |
-| **Auditor** | Read-only evidence/reports |
-| **Reviewer** | Approve access within GRC |
-| **Viewer** | Basic dashboard access |
-
-Users request access to GRC via IGA, which provisions entitlements.
-
----
-
-## Login Credentials
-
+### Login
 | Username | Password | Role |
 |----------|----------|------|
 | admin | admin123 | IGA Admin |
 | user | user123 | Standard User |
 
----
-
-## Flow: User Gets GRC Access
-
-1. **User** logs into IGA as `user`
-2. Goes to **Access Requests** → Requests `GRC Platform` + `Auditor` entitlement
-3. **Admin** approves the request
-4. IGA provisions the assignment → Generates `ACCESS_GRANTED` evidence
-5. **GRC** reads `/grc/evidence` and knows user has auditor access
-
----
-
-## GRC API Consumption
-
-GRC consumes IGA's read-only APIs:
-
+### Stop Services
 ```bash
-# Get all governance evidence
-GET /grc/evidence
+docker-compose down
+```
 
-# Get access summary by application
-GET /grc/access-summary
-
-# Get approval records
-GET /grc/approvals
-
-# Get policy violations
-GET /grc/violations
-
-# Get control mappings
-GET /grc/controls?framework=SOC2
+### View Logs
+```bash
+docker-compose logs -f
 ```
 
 ---
 
-## Quick Start
+## Development Setup (Without Docker)
 
-1. **Start Backend** (already running)
-   ```bash
-   cd backend
-   venv\Scripts\python.exe -m uvicorn app.main:app --reload
-   ```
+### Backend
+```bash
+cd backend
+python -m venv venv
+venv\Scripts\activate  # Windows
+pip install -r requirements.txt
+uvicorn app.main:app --reload
+```
 
-2. **Start Frontend** (already running)
-   ```bash
-   cd frontend
-   npm run dev
-   ```
+### Frontend
+```bash
+cd frontend
+npm install
+npm run dev
+```
 
-3. **Login** at http://localhost:5173
-   - `admin` / `admin123` for full access
-   - `user` / `user123` for user view
+### Database
+Requires PostgreSQL running locally on port 5432.
 
-4. **Register GRC** (if not seeded)
-   - Go to Applications → Register "GRC Platform"
-   - Add entitlements: Compliance Officer, Auditor, Reviewer
+---
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      IGA Platform                           │
+│                                                             │
+│  ┌──────────┐   ┌──────────┐   ┌──────────────────────┐    │
+│  │ Frontend │──▶│ Backend  │──▶│      PostgreSQL      │    │
+│  │  (React) │   │ (FastAPI)│   │                      │    │
+│  │  :80     │   │  :8000   │   │       :5432          │    │
+│  └──────────┘   └──────────┘   └──────────────────────┘    │
+│                                                             │
+│  Roles: admin, user                                         │
+│  GRC: Registered as application with entitlements           │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| POSTGRES_USER | iga | Database user |
+| POSTGRES_PASSWORD | iga_password | Database password |
+| POSTGRES_DB | iga_db | Database name |
+| JWT_SECRET | (set in .env) | JWT signing key |
+| DEBUG | false | Enable debug mode |

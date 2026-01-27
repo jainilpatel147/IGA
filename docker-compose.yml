@@ -1,0 +1,72 @@
+# IGA Platform - Docker Compose
+# Run: docker-compose up -d
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: iga-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-iga}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-iga_password}
+      POSTGRES_DB: ${POSTGRES_DB:-iga_db}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-iga} -d ${POSTGRES_DB:-iga_db}" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - iga-network
+
+  # FastAPI Backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: iga-backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-iga}:${POSTGRES_PASSWORD:-iga_password}@postgres:5432/${POSTGRES_DB:-iga_db}
+      JWT_SECRET: ${JWT_SECRET:-your-super-secret-key-change-in-production}
+      DEBUG: ${DEBUG:-false}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - iga-network
+
+  # React Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: iga-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - iga-network
+
+# Volumes for data persistence
+volumes:
+  postgres_data:
+    driver: local
+
+# Internal network
+networks:
+  iga-network:
+    driver: bridge
