@@ -3,7 +3,9 @@
  * Centralized API calls to the IGA backend
  */
 
-const API_BASE = 'http://localhost:8000';
+// In Docker: frontend is served on port 80, backend on 8000
+// Nginx proxies /api/* to backend, but direct routes also work
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 /**
  * Generic fetch wrapper with error handling
