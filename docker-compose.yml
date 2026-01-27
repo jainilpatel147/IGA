@@ -31,7 +31,7 @@ services:
     container_name: iga-backend
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-iga}:${POSTGRES_PASSWORD:-iga_password}@postgres:5432/${POSTGRES_DB:-iga_db}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-iga}:${POSTGRES_PASSWORD:-iga_password}@postgres:5432/${POSTGRES_DB:-iga_db}
       JWT_SECRET: ${JWT_SECRET:-your-super-secret-key-change-in-production}
       DEBUG: ${DEBUG:-false}
     ports:
