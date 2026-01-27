@@ -29,7 +29,6 @@ build
 # Docker
 Dockerfile
 docker-compose*.yml
-nginx.conf
 
 # Testing
 coverage/
