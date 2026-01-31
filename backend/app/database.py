@@ -34,12 +34,3 @@ def get_db():
     finally:
         db.close()
 
-
-def init_db():
-    """Initialize database tables"""
-    # Import models to register them with Base
-    from app.models import identity, access_request, audit  # noqa
-    from app.models import api_key, connector, access_review  # noqa
-    from app.models import user_role, application, entitlement  # noqa
-    from app.models import application_assignment, governance_evidence  # noqa
-    Base.metadata.create_all(bind=engine)

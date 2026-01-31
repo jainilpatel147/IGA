@@ -9,7 +9,6 @@ from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from app.database import init_db
 from app.routes import identity, access, audit
 from app.routes import api_keys, connectors, access_reviews
 from app.routes import applications, grc
@@ -30,8 +29,6 @@ async def lifespan(app: FastAPI):
     """Application lifespan handler for startup/shutdown"""
     # Startup
     logger.info("Starting IGA Platform...")
-    init_db()
-    logger.info("Database initialized")
     
     # Generate demo token for convenience
     demo_token = get_demo_token("admin")
@@ -75,7 +72,18 @@ app = FastAPI(
 # CORS configuration for frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000", "http://localhost", "http://127.0.0.1"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "http://localhost:9011",
+        "http://localhost:8000",
+        "http://localhost:80",
+        "http://localhost",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:9011",
+        "http://127.0.0.1:8000",
+        "http://127.0.0.1",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
