@@ -22,6 +22,8 @@ from app.models import identity, access_request, audit  # noqa: F401
 from app.models import api_key, connector, access_review  # noqa: F401
 from app.models import user_role, application, entitlement  # noqa: F401
 from app.models import application_assignment, governance_evidence  # noqa: F401
+# NEW: Multi-tenancy models
+from app.models import tenant, identity_provider, role, admin  # noqa: F401
 
 # Alembic Config object
 config = context.config
