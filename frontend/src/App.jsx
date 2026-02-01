@@ -15,6 +15,8 @@ import Connectors from './pages/Connectors'
 import AccessReviews from './pages/AccessReviews'
 import Compliance from './pages/Compliance'
 import Applications from './pages/Applications'
+import ApplicationDetail from './pages/ApplicationDetail'
+import TenantDetail from './pages/TenantDetail'
 import GovernanceEvidence from './pages/GovernanceEvidence'
 import MyAccess from './pages/MyAccess'
 
@@ -71,6 +73,8 @@ function AppRoutes() {
                 <Route path="access-reviews" element={<AccessReviews />} />
                 <Route path="compliance" element={<Compliance />} />
                 <Route path="applications" element={<Applications />} />
+                <Route path="applications/:appId" element={<ApplicationDetail />} />
+                <Route path="applications/:appId/tenants/:tenantId" element={<TenantDetail />} />
                 <Route path="evidence" element={<GovernanceEvidence />} />
                 <Route path="my-access" element={<MyAccess />} />
             </Route>

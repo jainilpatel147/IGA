@@ -11,12 +11,11 @@ import {
     LockOutlined,
 } from '@ant-design/icons'
 import { useAuth } from '../context/AuthContext'
+import api from '../api/request'
 
 const { Title, Text } = Typography;
 const { Search } = Input;
 const { RangePicker } = DatePicker;
-
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 /**
  * Governance Evidence Page
@@ -39,8 +38,7 @@ function GovernanceEvidence() {
             if (filters.evidence_type) params.append('evidence_type', filters.evidence_type);
             if (filters.application_id) params.append('application_id', filters.application_id);
 
-            const res = await fetch(`${API_BASE}/grc/evidence?${params}`);
-            const data = await res.json();
+            const data = await api.get(`/grc/evidence?${params}`);
             setEvidence(data);
         } catch (error) {
             console.error('Failed to load evidence:', error);

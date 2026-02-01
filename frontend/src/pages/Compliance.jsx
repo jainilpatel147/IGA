@@ -12,10 +12,9 @@ import {
     AuditOutlined,
 } from '@ant-design/icons'
 import { getIdentities, getAccessRequests, getAuditEvents } from '../api/client'
+import api from '../api/request'
 
 const { Title, Text, Paragraph } = Typography;
-
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 /**
  * Compliance Page
@@ -46,9 +45,9 @@ function Compliance() {
                 getIdentities(),
                 getAccessRequests(),
                 getAuditEvents(),
-                fetch(`${API_BASE}/access-reviews`).then(r => r.json()).catch(() => []),
-                fetch(`${API_BASE}/connectors`).then(r => r.json()).catch(() => []),
-                fetch(`${API_BASE}/api-keys`).then(r => r.json()).catch(() => []),
+                api.get('/access-reviews').catch(() => []),
+                api.get('/connectors').catch(() => []),
+                api.get('/api-keys').catch(() => []),
             ]);
 
             const approvedRequests = requests.filter(r => r.status === 'approved');

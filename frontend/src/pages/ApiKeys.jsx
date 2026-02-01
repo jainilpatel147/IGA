@@ -11,10 +11,9 @@ import {
     ReloadOutlined,
     ExclamationCircleOutlined,
 } from '@ant-design/icons'
+import api from '../api/request'
 
 const { Title, Text, Paragraph } = Typography;
-
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 /**
  * API Keys Page
@@ -35,8 +34,7 @@ function ApiKeys() {
     async function fetchKeys() {
         try {
             setLoading(true);
-            const res = await fetch(`${API_BASE}/api-keys`);
-            const data = await res.json();
+            const data = await api.get('/api-keys');
             setKeys(data);
         } catch (error) {
             console.error('Failed to load API keys:', error);
@@ -48,19 +46,12 @@ function ApiKeys() {
     async function handleCreate(values) {
         try {
             setSubmitting(true);
-            const res = await fetch(`${API_BASE}/api-keys`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    name: values.name,
-                    scopes: values.scopes.join(','),
-                    expires_in_days: values.expires_in_days || null
-                })
+            const data = await api.post('/api-keys', {
+                name: values.name,
+                scopes: values.scopes.join(','),
+                expires_in_days: values.expires_in_days || null
             });
 
-            if (!res.ok) throw new Error('Failed to create key');
-
-            const data = await res.json();
             setNewKey(data.key);
             message.success('API key created');
             form.resetFields();
@@ -74,7 +65,7 @@ function ApiKeys() {
 
     async function handleRevoke(id) {
         try {
-            await fetch(`${API_BASE}/api-keys/${id}`, { method: 'DELETE' });
+            await api.delete(`/api-keys/${id}`);
             message.success('API key revoked');
             fetchKeys();
         } catch (error) {
@@ -84,8 +75,7 @@ function ApiKeys() {
 
     async function handleRotate(id) {
         try {
-            const res = await fetch(`${API_BASE}/api-keys/${id}/rotate`, { method: 'POST' });
-            const data = await res.json();
+            const data = await api.post(`/api-keys/${id}/rotate`);
             setNewKey(data.key);
             message.success('API key rotated');
             fetchKeys();

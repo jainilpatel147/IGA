@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect } from 'react';
+import api from '../api/request';
 
 /**
  * Auth Context
@@ -32,19 +33,8 @@ export function AuthProvider({ children }) {
 
     const login = async (username, password) => {
         try {
-            const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-            const response = await fetch(`${API_BASE}/auth/login`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username, password })
-            });
+            const data = await api.post('/auth/login', { username, password });
 
-            if (!response.ok) {
-                const error = await response.json();
-                throw new Error(error.detail || 'Login failed');
-            }
-
-            const data = await response.json();
             localStorage.setItem('iga-token', data.access_token);
             setToken(data.access_token);
 

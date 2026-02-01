@@ -12,6 +12,7 @@ import uuid
 
 from app.database import get_db
 from app.models.application import Application
+from app.models.tenant import Tenant
 from app.models.entitlement import Entitlement
 from app.models.application_assignment import ApplicationAssignment
 from app.models.identity import Identity
@@ -36,7 +37,9 @@ class ApplicationResponse(BaseModel):
     description: Optional[str]
     owner: str
     integration_type: str
+    deployment_type: str
     status: str
+    tenant_count: int
     created_at: datetime
 
     class Config:
@@ -114,7 +117,9 @@ async def create_application(
         description=application.description,
         owner=application.owner,
         integration_type=application.integration_type,
+        deployment_type=application.deployment_type,
         status=application.status,
+        tenant_count=0,
         created_at=application.created_at
     )
 
@@ -126,18 +131,21 @@ async def list_applications(
 ):
     """List all applications"""
     apps = db.query(Application).order_by(Application.created_at.desc()).all()
-    return [
-        ApplicationResponse(
+    result = []
+    for a in apps:
+        tenant_count = db.query(Tenant).filter(Tenant.application_id == a.id).count()
+        result.append(ApplicationResponse(
             id=str(a.id),
             name=a.name,
             description=a.description,
             owner=a.owner,
             integration_type=a.integration_type,
+            deployment_type=a.deployment_type,
             status=a.status,
+            tenant_count=tenant_count,
             created_at=a.created_at
-        )
-        for a in apps
-    ]
+        ))
+    return result
 
 
 @router.get("/{app_id}", response_model=ApplicationResponse)
@@ -152,13 +160,17 @@ async def get_application(app_id: str, db: Session = Depends(get_db)):
     if not app:
         raise HTTPException(status_code=404, detail="Application not found")
     
+    tenant_count = db.query(Tenant).filter(Tenant.application_id == app_uuid).count()
+    
     return ApplicationResponse(
         id=str(app.id),
         name=app.name,
         description=app.description,
         owner=app.owner,
         integration_type=app.integration_type,
+        deployment_type=app.deployment_type,
         status=app.status,
+        tenant_count=tenant_count,
         created_at=app.created_at
     )
 

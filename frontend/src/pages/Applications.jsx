@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
     Card, Table, Button, Modal, Form, Input, Select, Tag, Typography,
     Space, Badge, Spin, message, Tabs, Row, Col, Statistic, Tooltip
@@ -11,13 +12,14 @@ import {
     ClockCircleOutlined,
     TeamOutlined,
     SafetyCertificateOutlined,
+    CloudOutlined,
+    DesktopOutlined,
 } from '@ant-design/icons'
 import { useAuth } from '../context/AuthContext'
+import api from '../api/request'
 
 const { Title, Text, Paragraph } = Typography;
 const { TabPane } = Tabs;
-
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 /**
  * Applications Page
@@ -33,6 +35,7 @@ function Applications() {
     const [form] = Form.useForm();
     const [entitlementForm] = Form.useForm();
     const { user } = useAuth();
+    const navigate = useNavigate();
 
     useEffect(() => {
         fetchApplications();
@@ -41,8 +44,7 @@ function Applications() {
     async function fetchApplications() {
         try {
             setLoading(true);
-            const res = await fetch(`${API_BASE}/applications`);
-            const data = await res.json();
+            const data = await api.get('/applications');
             setApplications(data);
         } catch (error) {
             console.error('Failed to load applications:', error);
@@ -54,12 +56,7 @@ function Applications() {
     async function handleCreateApp(values) {
         try {
             setSubmitting(true);
-            const res = await fetch(`${API_BASE}/applications`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(values)
-            });
-            if (!res.ok) throw new Error('Failed to create');
+            await api.post('/applications', values);
             message.success('Application registered');
             setModalOpen(false);
             form.resetFields();
@@ -74,17 +71,12 @@ function Applications() {
     async function handleCreateEntitlement(values) {
         try {
             setSubmitting(true);
-            const res = await fetch(`${API_BASE}/applications/${entitlementModal.id}/entitlements`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(values)
-            });
-            if (!res.ok) throw new Error('Failed to create');
+            await api.post(`/applications/${entitlementModal.id}/entitlements`, values);
             message.success('Entitlement created');
             entitlementForm.resetFields();
             // Refresh entitlements
-            const entRes = await fetch(`${API_BASE}/applications/${entitlementModal.id}/entitlements`);
-            setEntitlementModal({ ...entitlementModal, entitlements: await entRes.json() });
+            const entitlements = await api.get(`/applications/${entitlementModal.id}/entitlements`);
+            setEntitlementModal({ ...entitlementModal, entitlements });
         } catch (error) {
             message.error('Failed to create entitlement');
         } finally {
@@ -94,8 +86,7 @@ function Applications() {
 
     async function openEntitlementModal(app) {
         try {
-            const res = await fetch(`${API_BASE}/applications/${app.id}/entitlements`);
-            const entitlements = await res.json();
+            const entitlements = await api.get(`/applications/${app.id}/entitlements`);
             setEntitlementModal({ ...app, entitlements });
         } catch (error) {
             message.error('Failed to load entitlements');
@@ -104,8 +95,7 @@ function Applications() {
 
     async function openAccessModal(app) {
         try {
-            const res = await fetch(`${API_BASE}/applications/${app.id}/access`);
-            const access = await res.json();
+            const access = await api.get(`/applications/${app.id}/access`);
             setAccessModal({ ...app, access });
         } catch (error) {
             message.error('Failed to load access');
@@ -114,9 +104,7 @@ function Applications() {
 
     async function updateStatus(appId, status) {
         try {
-            await fetch(`${API_BASE}/applications/${appId}/status?status=${status}`, {
-                method: 'PATCH'
-            });
+            await api.patch(`/applications/${appId}/status?status=${status}`);
             message.success('Status updated');
             fetchApplications();
         } catch (error) {
@@ -132,12 +120,35 @@ function Applications() {
                 <Space>
                     <AppstoreOutlined style={{ fontSize: 20, color: '#1677ff' }} />
                     <div>
-                        <Text strong>{record.name}</Text>
+                        <Text
+                            strong
+                            style={{ cursor: 'pointer', color: '#1677ff' }}
+                            onClick={() => navigate(`/applications/${record.id}`)}
+                        >
+                            {record.name}
+                        </Text>
                         <br />
                         <Text type="secondary" style={{ fontSize: 12 }}>{record.description}</Text>
                     </div>
                 </Space>
             ),
+        },
+        {
+            title: 'Deployment',
+            dataIndex: 'deployment_type',
+            key: 'deployment_type',
+            render: (type) => {
+                if (type === 'cloud') {
+                    return <Tag icon={<CloudOutlined />} color="blue">CLOUD</Tag>;
+                }
+                return <Tag icon={<DesktopOutlined />} color="purple">ON-PREMISE</Tag>;
+            },
+        },
+        {
+            title: 'Tenants',
+            dataIndex: 'tenant_count',
+            key: 'tenant_count',
+            render: (count) => <Tag color="cyan">{count} tenant{count !== 1 ? 's' : ''}</Tag>,
         },
         {
             title: 'Owner',
@@ -171,14 +182,18 @@ function Applications() {
             key: 'actions',
             render: (_, record) => (
                 <Space>
+                    <Tooltip title="View Details">
+                        <Button
+                            type="primary"
+                            size="small"
+                            onClick={() => navigate(`/applications/${record.id}`)}
+                        >
+                            View
+                        </Button>
+                    </Tooltip>
                     <Tooltip title="Manage entitlements">
                         <Button size="small" icon={<SafetyCertificateOutlined />} onClick={() => openEntitlementModal(record)}>
                             Entitlements
-                        </Button>
-                    </Tooltip>
-                    <Tooltip title="View access">
-                        <Button size="small" icon={<TeamOutlined />} onClick={() => openAccessModal(record)}>
-                            Access
                         </Button>
                     </Tooltip>
                     {user?.role === 'admin' && record.status === 'pending' && (

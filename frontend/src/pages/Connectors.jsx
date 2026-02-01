@@ -15,10 +15,9 @@ import {
     SafetyOutlined,
     LinkOutlined,
 } from '@ant-design/icons'
+import api from '../api/request'
 
 const { Title, Text, Paragraph } = Typography;
-
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 /**
  * Connectors Page
@@ -39,8 +38,7 @@ function Connectors() {
     async function fetchConnectors() {
         try {
             setLoading(true);
-            const res = await fetch(`${API_BASE}/connectors`);
-            const data = await res.json();
+            const data = await api.get('/connectors');
             setConnectors(data);
         } catch (error) {
             console.error('Failed to load connectors:', error);
@@ -52,22 +50,16 @@ function Connectors() {
     async function handleCreate(values) {
         try {
             setSubmitting(true);
-            const res = await fetch(`${API_BASE}/connectors`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    name: values.name,
-                    description: values.description,
-                    connector_type: values.connector_type,
-                    config: {
-                        base_url: values.base_url,
-                        client_id: values.client_id,
-                        client_secret: values.client_secret,
-                    }
-                })
+            await api.post('/connectors', {
+                name: values.name,
+                description: values.description,
+                connector_type: values.connector_type,
+                config: {
+                    base_url: values.base_url,
+                    client_id: values.client_id,
+                    client_secret: values.client_secret,
+                }
             });
-
-            if (!res.ok) throw new Error('Failed to create connector');
 
             message.success('Connector created');
             setModalOpen(false);
@@ -83,8 +75,7 @@ function Connectors() {
     async function handleTest(id) {
         try {
             setTesting(id);
-            const res = await fetch(`${API_BASE}/connectors/${id}/test`, { method: 'POST' });
-            const data = await res.json();
+            const data = await api.post(`/connectors/${id}/test`);
 
             if (data.success) {
                 message.success('Connection successful');
@@ -101,7 +92,7 @@ function Connectors() {
 
     async function handleDelete(id) {
         try {
-            await fetch(`${API_BASE}/connectors/${id}`, { method: 'DELETE' });
+            await api.delete(`/connectors/${id}`);
             message.success('Connector deleted');
             fetchConnectors();
         } catch (error) {

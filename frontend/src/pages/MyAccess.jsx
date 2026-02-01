@@ -10,11 +10,9 @@ import {
 } from '@ant-design/icons'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { getIdentities } from '../api/client'
+import api from '../api/request'
 
 const { Title, Text } = Typography;
-
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 /**
  * My Access Page
@@ -34,15 +32,13 @@ function MyAccess() {
             setLoading(true);
             // In a real app, this would filter by the current user's identity
             // For demo, we show all applications and their access
-            const appsRes = await fetch(`${API_BASE}/applications`);
-            const apps = await appsRes.json();
+            const apps = await api.get('/applications');
 
             // Collect all access we have
             const allAccess = [];
             for (const app of apps) {
                 try {
-                    const accessRes = await fetch(`${API_BASE}/applications/${app.id}/access`);
-                    const appAccess = await accessRes.json();
+                    const appAccess = await api.get(`/applications/${app.id}/access`);
                     for (const a of appAccess) {
                         allAccess.push({
                             ...a,

@@ -10,10 +10,9 @@ import {
     PlayCircleOutlined,
     EyeOutlined,
 } from '@ant-design/icons'
+import api from '../api/request'
 
 const { Title, Text } = Typography;
-
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 /**
  * Access Reviews Page
@@ -34,8 +33,7 @@ function AccessReviews() {
     async function fetchReviews() {
         try {
             setLoading(true);
-            const res = await fetch(`${API_BASE}/access-reviews`);
-            const data = await res.json();
+            const data = await api.get('/access-reviews');
             setReviews(data);
         } catch (error) {
             console.error('Failed to load reviews:', error);
@@ -46,8 +44,7 @@ function AccessReviews() {
 
     async function fetchReviewDetails(id) {
         try {
-            const res = await fetch(`${API_BASE}/access-reviews/${id}`);
-            const data = await res.json();
+            const data = await api.get(`/access-reviews/${id}`);
             setDetailsModal(data);
         } catch (error) {
             message.error('Failed to load review details');
@@ -57,18 +54,12 @@ function AccessReviews() {
     async function handleCreate(values) {
         try {
             setSubmitting(true);
-            const res = await fetch(`${API_BASE}/access-reviews`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    name: values.name,
-                    description: values.description,
-                    resource_filter: values.resource_filter,
-                    end_date: values.end_date?.toISOString()
-                })
+            await api.post('/access-reviews', {
+                name: values.name,
+                description: values.description,
+                resource_filter: values.resource_filter,
+                end_date: values.end_date?.toISOString()
             });
-
-            if (!res.ok) throw new Error('Failed to create review');
 
             message.success('Access review created');
             setModalOpen(false);
@@ -83,7 +74,7 @@ function AccessReviews() {
 
     async function handleStart(id) {
         try {
-            await fetch(`${API_BASE}/access-reviews/${id}/start`, { method: 'POST' });
+            await api.post(`/access-reviews/${id}/start`);
             message.success('Review started');
             fetchReviews();
         } catch (error) {
@@ -93,11 +84,7 @@ function AccessReviews() {
 
     async function handleDecision(reviewId, itemId, decision) {
         try {
-            await fetch(`${API_BASE}/access-reviews/${reviewId}/items/${itemId}/decide`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ decision })
-            });
+            await api.post(`/access-reviews/${reviewId}/items/${itemId}/decide`, { decision });
             message.success(`Access ${decision}`);
             fetchReviewDetails(reviewId);
             fetchReviews();
