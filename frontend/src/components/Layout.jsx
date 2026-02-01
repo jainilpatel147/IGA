@@ -78,6 +78,19 @@ function Layout() {
             icon: <UnlockOutlined />,
             label: 'My Access',
         }] : []),
+        // Applications
+        {
+            key: 'apps-group',
+            label: 'Applications',
+            type: 'group',
+            children: [
+                {
+                    key: '/applications',
+                    icon: <AppstoreOutlined />,
+                    label: 'Application Registry',
+                },
+            ],
+        },
         // Identity Management (Admin only)
         {
             key: 'identity-group',
@@ -103,19 +116,6 @@ function Layout() {
                     key: '/resources',
                     icon: <DatabaseOutlined />,
                     label: 'Resources',
-                },
-            ],
-        },
-        // Applications
-        {
-            key: 'apps-group',
-            label: 'Applications',
-            type: 'group',
-            children: [
-                {
-                    key: '/applications',
-                    icon: <AppstoreOutlined />,
-                    label: 'Application Registry',
                 },
             ],
         },
