@@ -63,16 +63,28 @@ def upgrade() -> None:
     sa.Column('name', sa.String(length=100), nullable=False),
     sa.Column('display_name', sa.String(length=150), nullable=True),
     sa.Column('description', sa.Text(), nullable=True),
-    sa.Column('is_privileged', sa.Boolean(), nullable=False),
-    sa.Column('risk_level', sa.String(length=20), nullable=False),
-    sa.Column('is_system', sa.Boolean(), nullable=False),
-    sa.Column('extra_data', postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+    sa.Column('is_privileged', sa.Boolean(), nullable=True),
+    sa.Column('risk_level', sa.String(length=20), nullable=True),
+    sa.Column('is_system', sa.Boolean(), nullable=True),
+    sa.Column('extra_data', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
     sa.Column('created_at', sa.DateTime(), nullable=False),
     sa.Column('updated_at', sa.DateTime(), nullable=True),
     sa.ForeignKeyConstraint(['tenant_id'], ['tenants.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('tenant_id', 'name', name='uq_role_tenant_name')
     )
+    
+    # Set default values for roles (though op.create_table won't have data yet if it's new, 
+    # but let's be safe if it's somehow mapping to existing rows)
+    op.execute("UPDATE roles SET is_privileged = false WHERE is_privileged IS NULL")
+    op.execute("UPDATE roles SET risk_level = 'low' WHERE risk_level IS NULL")
+    op.execute("UPDATE roles SET is_system = false WHERE is_system IS NULL")
+    op.execute("UPDATE roles SET extra_data = '{}'::jsonb WHERE extra_data IS NULL")
+    
+    op.alter_column('roles', 'is_privileged', nullable=False)
+    op.alter_column('roles', 'risk_level', nullable=False)
+    op.alter_column('roles', 'is_system', nullable=False)
+    op.alter_column('roles', 'extra_data', nullable=False)
     op.create_index(op.f('ix_roles_tenant_id'), 'roles', ['tenant_id'], unique=False)
     op.create_table('application_admins',
     sa.Column('id', sa.UUID(), nullable=False),
@@ -147,17 +159,19 @@ def upgrade() -> None:
     )
     op.create_index(op.f('ix_tenant_admins_identity_id'), 'tenant_admins', ['identity_id'], unique=False)
     op.create_index(op.f('ix_tenant_admins_tenant_id'), 'tenant_admins', ['tenant_id'], unique=False)
-    op.add_column('access_requests', sa.Column('tenant_id', sa.UUID(), nullable=False))
-    op.add_column('access_requests', sa.Column('requester_identity_id', sa.UUID(), nullable=False))
-    op.add_column('access_requests', sa.Column('target_identity_id', sa.UUID(), nullable=False))
-    op.add_column('access_requests', sa.Column('role_id', sa.UUID(), nullable=False))
+    op.add_column('access_requests', sa.Column('tenant_id', sa.UUID(), nullable=True))
+    op.add_column('access_requests', sa.Column('requester_identity_id', sa.UUID(), nullable=True))
+    op.add_column('access_requests', sa.Column('target_identity_id', sa.UUID(), nullable=True))
+    op.add_column('access_requests', sa.Column('role_id', sa.UUID(), nullable=True))
     op.add_column('access_requests', sa.Column('justification', sa.Text(), nullable=True))
     op.add_column('access_requests', sa.Column('reviewed_by', sa.UUID(), nullable=True))
     op.add_column('access_requests', sa.Column('review_notes', sa.Text(), nullable=True))
     op.add_column('access_requests', sa.Column('reviewed_at', sa.DateTime(), nullable=True))
     op.add_column('access_requests', sa.Column('requested_valid_from', sa.DateTime(), nullable=True))
     op.add_column('access_requests', sa.Column('requested_valid_until', sa.DateTime(), nullable=True))
-    op.add_column('access_requests', sa.Column('extra_data', postgresql.JSONB(astext_type=sa.Text()), nullable=False))
+    op.add_column('access_requests', sa.Column('extra_data', postgresql.JSONB(astext_type=sa.Text()), nullable=True))
+    op.execute("UPDATE access_requests SET extra_data = '{}'::jsonb WHERE extra_data IS NULL")
+    op.alter_column('access_requests', 'extra_data', nullable=False)
     op.drop_index(op.f('ix_access_requests_identity_id'), table_name='access_requests')
     op.create_index(op.f('ix_access_requests_requester_identity_id'), 'access_requests', ['requester_identity_id'], unique=False)
     op.create_index(op.f('ix_access_requests_role_id'), 'access_requests', ['role_id'], unique=False)
@@ -171,13 +185,18 @@ def upgrade() -> None:
     op.drop_column('access_requests', 'identity_id')
     op.drop_column('access_requests', 'resource')
     op.drop_column('access_requests', 'role')
-    op.add_column('applications', sa.Column('deployment_type', sa.String(length=20), nullable=False))
+    op.add_column('applications', sa.Column('deployment_type', sa.String(length=20), nullable=True))
+    # Populate existing applications with a default deployment_type
+    op.execute("UPDATE applications SET deployment_type = 'on_premise' WHERE deployment_type IS NULL")
+    op.alter_column('applications', 'deployment_type', nullable=False)
     op.create_unique_constraint(None, 'applications', ['name'])
     op.add_column('audit_events', sa.Column('tenant_id', sa.UUID(), nullable=True))
     op.add_column('audit_events', sa.Column('actor_identity_id', sa.UUID(), nullable=True))
     op.add_column('audit_events', sa.Column('target_type', sa.String(length=100), nullable=True))
     op.add_column('audit_events', sa.Column('target_id', sa.UUID(), nullable=True))
-    op.add_column('audit_events', sa.Column('details', postgresql.JSONB(astext_type=sa.Text()), nullable=False))
+    op.add_column('audit_events', sa.Column('details', postgresql.JSONB(astext_type=sa.Text()), nullable=True))
+    op.execute("UPDATE audit_events SET details = '{}'::jsonb WHERE details IS NULL")
+    op.alter_column('audit_events', 'details', nullable=False)
     op.alter_column('audit_events', 'target',
                existing_type=sa.VARCHAR(length=255),
                nullable=True)
@@ -188,17 +207,28 @@ def upgrade() -> None:
     op.add_column('entitlements', sa.Column('display_name', sa.String(length=150), nullable=True))
     op.add_column('entitlements', sa.Column('resource_type', sa.String(length=100), nullable=True))
     op.add_column('entitlements', sa.Column('action', sa.String(length=50), nullable=True))
-    op.add_column('entitlements', sa.Column('extra_data', postgresql.JSONB(astext_type=sa.Text()), nullable=False))
+    op.add_column('entitlements', sa.Column('extra_data', postgresql.JSONB(astext_type=sa.Text()), nullable=True))
+    op.execute("UPDATE entitlements SET extra_data = '{}'::jsonb WHERE extra_data IS NULL")
+    op.alter_column('entitlements', 'extra_data', nullable=False)
     op.create_index(op.f('ix_entitlements_application_id'), 'entitlements', ['application_id'], unique=False)
     op.create_unique_constraint('uq_entitlement_app_name', 'entitlements', ['application_id', 'name'])
     op.drop_constraint(op.f('entitlements_application_id_fkey'), 'entitlements', type_='foreignkey')
     op.create_foreign_key(None, 'entitlements', 'applications', ['application_id'], ['id'], ondelete='CASCADE')
-    op.add_column('identities', sa.Column('tenant_id', sa.UUID(), nullable=False))
+    op.add_column('identities', sa.Column('tenant_id', sa.UUID(), nullable=True))
     op.add_column('identities', sa.Column('email', sa.String(length=255), nullable=True))
     op.add_column('identities', sa.Column('external_id', sa.String(length=255), nullable=True))
-    op.add_column('identities', sa.Column('identity_type', sa.String(length=50), nullable=False))
-    op.add_column('identities', sa.Column('status', sa.String(length=20), nullable=False))
-    op.add_column('identities', sa.Column('attributes', postgresql.JSONB(astext_type=sa.Text()), nullable=False))
+    op.add_column('identities', sa.Column('identity_type', sa.String(length=50), nullable=True))
+    op.add_column('identities', sa.Column('status', sa.String(length=20), nullable=True))
+    op.add_column('identities', sa.Column('attributes', postgresql.JSONB(astext_type=sa.Text()), nullable=True))
+    
+    # Set default values for identities
+    op.execute("UPDATE identities SET identity_type = 'user' WHERE identity_type IS NULL")
+    op.execute("UPDATE identities SET status = 'active' WHERE status IS NULL")
+    op.execute("UPDATE identities SET attributes = '{}'::jsonb WHERE attributes IS NULL")
+    
+    op.alter_column('identities', 'identity_type', nullable=False)
+    op.alter_column('identities', 'status', nullable=False)
+    op.alter_column('identities', 'attributes', nullable=False)
     op.add_column('identities', sa.Column('updated_at', sa.DateTime(), nullable=True))
     op.add_column('identities', sa.Column('last_login_at', sa.DateTime(), nullable=True))
     op.create_index(op.f('ix_identities_email'), 'identities', ['email'], unique=False)

@@ -26,6 +26,14 @@ router = APIRouter(prefix="/tenants", tags=["Tenants"])
 # SCHEMAS
 # ============================================
 
+class TenantCreateRequest(BaseModel):
+    application_id: str
+    name: str
+    slug: Optional[str] = None
+    description: Optional[str] = None
+    tenant_type: str = "customer"  # default, customer
+    status: str = "active"
+
 class TenantResponse(BaseModel):
     id: str
     application_id: str
@@ -126,6 +134,89 @@ class IdentityProviderResponse(BaseModel):
 # ============================================
 # ROUTES: Tenants
 # ============================================
+
+@router.post("", response_model=TenantResponse, status_code=status.HTTP_201_CREATED)
+def create_tenant(
+    request: TenantCreateRequest,
+    db: Session = Depends(get_db),
+    user: dict = Depends(require_permission("manage:applications"))
+):
+    """Create a new tenant for an application"""
+    try:
+        app_uuid = uuid.UUID(request.application_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid application ID")
+    
+    app = db.query(Application).filter(Application.id == app_uuid).first()
+    if not app:
+        raise HTTPException(status_code=404, detail="Application not found")
+    
+    # Validation: on_premise applications only allow one tenant
+    if app.deployment_type == "on_premise":
+        existing_count = db.query(Tenant).filter(Tenant.application_id == app_uuid).count()
+        if existing_count > 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, 
+                detail="On-premise applications only support a single tenant."
+            )
+        # Force tenant_type to default for on_premise
+        request.tenant_type = "default"
+    
+    # Generate slug if not provided
+    slug = request.slug
+    if not slug:
+        slug = request.name.lower().replace(" ", "-").replace("_", "-")
+        # Ensure slug only contains valid chars (very basic check)
+        slug = "".join(c for c in slug if c.isalnum() or c == "-")
+        
+    # Check if name/slug already exists for this application
+    existing = db.query(Tenant).filter(
+        Tenant.application_id == app_uuid,
+        (Tenant.name == request.name) | (Tenant.slug == slug)
+    ).first()
+    
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, 
+            detail="Tenant name or slug already exists for this application"
+        )
+    
+    tenant = Tenant(
+        application_id=app_uuid,
+        name=request.name,
+        slug=slug,
+        description=request.description,
+        tenant_type=request.tenant_type,
+        status=request.status,
+        is_default=(request.tenant_type == "default")
+    )
+    
+    db.add(tenant)
+    db.commit()
+    db.refresh(tenant)
+    
+    AuditService.log_event(
+        db=db,
+        event_type="tenant",
+        action="create",
+        actor=user.get("username", "admin"),
+        target=f"{app.name}:{request.name}",
+        decision="allow",
+        reason=f"Tenant created for application {app.name}"
+    )
+    
+    return TenantResponse(
+        id=str(tenant.id),
+        application_id=str(tenant.application_id),
+        name=tenant.name,
+        slug=tenant.slug,
+        description=tenant.description,
+        tenant_type=tenant.tenant_type,
+        is_default=tenant.is_default,
+        status=tenant.status,
+        created_at=tenant.created_at
+    )
+
 
 @router.get("/by-application/{app_id}", response_model=List[TenantResponse])
 def list_tenants_by_application(

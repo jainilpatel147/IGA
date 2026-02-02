@@ -12,8 +12,10 @@ import {
     DesktopOutlined,
     ArrowLeftOutlined,
     AuditOutlined,
+    PlusOutlined,
 } from '@ant-design/icons'
 import api from '../api/request'
+import { message, Modal, Form, Input } from 'antd'
 
 const { Title, Text } = Typography;
 
@@ -29,6 +31,8 @@ function ApplicationDetail() {
     const [tenants, setTenants] = useState([]);
     const [reviews, setReviews] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [isAddTenantModalVisible, setIsAddTenantModalVisible] = useState(false);
+    const [form] = Form.useForm();
 
     useEffect(() => {
         fetchData();
@@ -57,6 +61,23 @@ function ApplicationDetail() {
             console.error('Failed to load application:', error);
         } finally {
             setLoading(false);
+        }
+    }
+
+    async function handleCreateTenant(values) {
+        try {
+            await api.post('/tenants', {
+                application_id: appId,
+                ...values,
+                tenant_type: application.deployment_type === 'cloud' ? 'customer' : 'default'
+            });
+            message.success('Tenant created successfully');
+            setIsAddTenantModalVisible(false);
+            form.resetFields();
+            fetchData();
+        } catch (error) {
+            console.error('Failed to create tenant:', error);
+            message.error(error.message || 'Failed to create tenant');
         }
     }
 
@@ -273,10 +294,22 @@ function ApplicationDetail() {
             {/* Tenants Table */}
             <Card
                 title={
-                    <Space>
-                        <TeamOutlined />
-                        <span>Tenants ({tenants.length})</span>
-                    </Space>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                        <Space>
+                            <TeamOutlined />
+                            <span>Tenants ({tenants.length})</span>
+                        </Space>
+                        {application.can_add_tenant !== false && (application.deployment_type === 'cloud' || tenants.length === 0) && (
+                            <Button
+                                type="primary"
+                                icon={<PlusOutlined />}
+                                size="small"
+                                onClick={() => setIsAddTenantModalVisible(true)}
+                            >
+                                Add Tenant
+                            </Button>
+                        )}
+                    </div>
                 }
                 style={{ marginBottom: 24 }}
             >
@@ -313,6 +346,47 @@ function ApplicationDetail() {
                     <Empty description="No access reviews found" />
                 )}
             </Card>
+            {/* Add Tenant Modal */}
+            <Modal
+                title="Add New Tenant"
+                open={isAddTenantModalVisible}
+                onCancel={() => {
+                    setIsAddTenantModalVisible(false);
+                    form.resetFields();
+                }}
+                onOk={() => form.submit()}
+                destroyOnClose
+            >
+                <Form
+                    form={form}
+                    layout="vertical"
+                    onFinish={handleCreateTenant}
+                    initialValues={{
+                        status: 'active'
+                    }}
+                >
+                    <Form.Item
+                        name="name"
+                        label="Tenant Name"
+                        rules={[{ required: true, message: 'Please enter tenant name' }]}
+                    >
+                        <Input placeholder="Acme Corp" />
+                    </Form.Item>
+                    <Form.Item
+                        name="slug"
+                        label="Slug (Optional)"
+                        extra="URL-friendly identifier. Will be generated from name if left blank."
+                    >
+                        <Input placeholder="acme-corp" />
+                    </Form.Item>
+                    <Form.Item
+                        name="description"
+                        label="Description"
+                    >
+                        <Input.TextArea placeholder="Enter tenant description" rows={3} />
+                    </Form.Item>
+                </Form>
+            </Modal>
         </div>
     );
 }
