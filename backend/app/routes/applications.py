@@ -28,6 +28,7 @@ class ApplicationCreate(BaseModel):
     name: str
     description: Optional[str] = None
     owner: str
+    deployment_type: str = "on_premise"  # cloud, on_premise
     integration_type: str = "readonly"  # api, token, readonly
 
 
@@ -93,6 +94,7 @@ async def create_application(
         name=request.name,
         description=request.description,
         owner=request.owner,
+        deployment_type=request.deployment_type,
         integration_type=request.integration_type,
         status="pending"
     )

@@ -296,7 +296,7 @@ function Applications() {
                 footer={null}
                 destroyOnClose
             >
-                <Form form={form} layout="vertical" onFinish={handleCreateApp} initialValues={{ integration_type: 'readonly' }}>
+                <Form form={form} layout="vertical" onFinish={handleCreateApp} initialValues={{ integration_type: 'readonly', deployment_type: 'on_premise' }}>
                     <Form.Item name="name" label="Application Name" rules={[{ required: true }]}>
                         <Input placeholder="e.g., Salesforce, Jira, AWS" />
                     </Form.Item>
@@ -305,6 +305,22 @@ function Applications() {
                     </Form.Item>
                     <Form.Item name="owner" label="Owner" rules={[{ required: true }]}>
                         <Input placeholder="Team or person responsible" />
+                    </Form.Item>
+                    <Form.Item name="deployment_type" label="Deployment Type" rules={[{ required: true }]}>
+                        <Select>
+                            <Select.Option value="cloud">
+                                <Space>
+                                    <CloudOutlined />
+                                    Cloud (Multi-Tenant)
+                                </Space>
+                            </Select.Option>
+                            <Select.Option value="on_premise">
+                                <Space>
+                                    <DesktopOutlined />
+                                    On-Premise
+                                </Space>
+                            </Select.Option>
+                        </Select>
                     </Form.Item>
                     <Form.Item name="integration_type" label="Integration Type">
                         <Select>

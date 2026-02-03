@@ -10,7 +10,7 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install dependencies
-RUN npm ci
+RUN npm config set fetch-retry-maxtimeout 120000 && npm ci
 
 # Copy source code
 COPY . .

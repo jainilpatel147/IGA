@@ -161,7 +161,7 @@ function Layout() {
                 {
                     key: '/connectors',
                     icon: <LinkOutlined />,
-                    label: 'Connectors',
+                    label: 'Connector Catalog',
                 },
             ],
         },

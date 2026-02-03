@@ -80,6 +80,7 @@ class Application(Base):
     tenants = relationship("Tenant", back_populates="application", cascade="all, delete-orphan")
     entitlements = relationship("Entitlement", back_populates="application", cascade="all, delete-orphan")
     assignments = relationship("ApplicationAssignment", back_populates="application")
+    application_connectors = relationship("ApplicationConnector", back_populates="application", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Application {self.name} ({self.deployment_type})>"

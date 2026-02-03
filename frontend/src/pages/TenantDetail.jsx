@@ -16,7 +16,11 @@ import {
     DeleteOutlined,
     UserAddOutlined,
     AppstoreOutlined,
-    AuditOutlined
+    AuditOutlined,
+    SyncOutlined,
+    EyeOutlined,
+    LinkOutlined,
+    CloudSyncOutlined
 } from '@ant-design/icons'
 import api from '../api/request'
 import { useAuth } from '../context/AuthContext'
@@ -37,17 +41,23 @@ function TenantDetail() {
     const [identities, setIdentities] = useState([]);
     const [roles, setRoles] = useState([]);
     const [entitlements, setEntitlements] = useState([]);
-    const [idps, setIdps] = useState([]);
+    const [connectors, setConnectors] = useState([]);
+    const [templates, setTemplates] = useState([]);
     const [loading, setLoading] = useState(true);
     const [activeTab, setActiveTab] = useState('identities');
 
     // Modal states
     const [createModalOpen, setCreateModalOpen] = useState(false);
     const [assignRoleModalOpen, setAssignRoleModalOpen] = useState(false);
+    const [connectorModalOpen, setConnectorModalOpen] = useState(false);
+    const [connectorDetailsModal, setConnectorDetailsModal] = useState(null);
     const [selectedIdentity, setSelectedIdentity] = useState(null);
     const [identityRoles, setIdentityRoles] = useState({});
+    const [testing, setTesting] = useState(null);
     const [form] = Form.useForm();
     const [roleForm] = Form.useForm();
+    const [connectorForm] = Form.useForm();
+    const [syncing, setSyncing] = useState(null);
 
     useEffect(() => {
         fetchData();
@@ -73,9 +83,13 @@ function TenantDetail() {
             const entData = await api.get(`/applications/${appId}/entitlements`);
             setEntitlements(entData);
 
-            // Fetch identity providers
-            const idpsData = await api.get(`/tenants/${tenantId}/identity-providers`);
-            setIdps(idpsData);
+            // Fetch tenant connectors
+            const connectorsData = await api.get(`/tenants/${tenantId}/connectors`);
+            setConnectors(connectorsData);
+
+            // Fetch connector templates
+            const templatesData = await api.get('/connector-templates');
+            setTemplates(templatesData);
 
             // Fetch roles for each identity
             const rolesMap = {};
@@ -142,6 +156,112 @@ function TenantDetail() {
             fetchData();
         } catch (error) {
             message.error(error.message);
+        }
+    }
+
+    async function handleCreateConnector(values) {
+        try {
+            const template = templates.find(t => t.id === values.template_id);
+
+            if (!template) {
+                message.error('Selected connector template not found');
+                return;
+            }
+
+            const config = {};
+            template.config_schema.fields.forEach(field => {
+                if (values[field.name]) {
+                    config[field.name] = values[field.name];
+                }
+            });
+
+            // Validate all required fields are present
+            const missingFields = template.config_schema.fields
+                .filter(f => f.required && !config[f.name])
+                .map(f => f.label);
+
+            if (missingFields.length > 0) {
+                message.error(`Missing required fields: ${missingFields.join(', ')}`);
+                return;
+            }
+
+            await api.post(`/tenants/${tenantId}/connectors`, {
+                template_id: values.template_id,
+                config
+            });
+
+            message.success('Connector configured successfully');
+            setConnectorModalOpen(false);
+            connectorForm.resetFields();
+            fetchData();
+        } catch (error) {
+            console.error('Connector creation error:', error);
+            message.error(error.message || 'Failed to create connector');
+        }
+    }
+
+    async function handleTestConnector(connectorId) {
+        try {
+            setTesting(connectorId);
+            const data = await api.post(`/tenants/${tenantId}/connectors/${connectorId}/test`);
+
+            if (data.success) {
+                message.success('Connection successful');
+            } else {
+                message.error(data.message);
+            }
+            fetchData();
+        } catch (error) {
+            message.error('Connection test failed');
+        } finally {
+            setTesting(null);
+        }
+    }
+
+    const handleDeleteConnector = async (connectorId) => {
+        try {
+            await api.delete(`/tenants/${tenantId}/connectors/${connectorId}`);
+            message.success('Connector deleted successfully');
+            fetchData();
+        } catch (error) {
+            message.error('Failed to delete connector');
+        }
+    }
+
+    const handleSyncIdentities = async (connectorId) => {
+        setSyncing(connectorId);
+        try {
+            const response = await api.post(`/tenants/${tenantId}/connectors/${connectorId}/sync-identities`);
+            message.success(response.data.message);
+            fetchData();
+        } catch (error) {
+            const errorMsg = error.response?.data?.detail || 'Identity sync failed';
+            message.error(errorMsg);
+        } finally {
+            setSyncing(null);
+        }
+    }
+
+    const handleSyncResources = async (connectorId) => {
+        setSyncing(connectorId);
+        try {
+            const response = await api.post(`/tenants/${tenantId}/connectors/${connectorId}/sync-resources`);
+            message.success(response.data.message);
+            fetchData();
+        } catch (error) {
+            const errorMsg = error.response?.data?.detail || 'Resource sync failed';
+            message.error(errorMsg);
+        } finally {
+            setSyncing(null);
+        }
+    }
+
+    async function showConnectorDetails(connectorId) {
+        try {
+            const data = await api.get(`/tenants/${tenantId}/connectors/${connectorId}`);
+            setConnectorDetailsModal(data);
+        } catch (error) {
+            message.error('Failed to load details');
         }
     }
 
@@ -308,49 +428,131 @@ function TenantDetail() {
         },
     ];
 
-    const idpColumns = [
+    const connectorColumns = [
         {
-            title: 'Provider',
+            title: 'Connector',
             key: 'name',
-            render: (_, record) => (
-                <Space>
-                    <KeyOutlined style={{ fontSize: 16, color: '#1677ff' }} />
-                    <div>
-                        <Text strong>{record.name}</Text>
-                        {record.is_primary && <Tag color="gold" style={{ marginLeft: 8 }}>PRIMARY</Tag>}
-                        <br />
-                        <Text type="secondary" style={{ fontSize: 12 }}>{record.description}</Text>
-                    </div>
-                </Space>
-            ),
+            render: (_, record) => {
+                const providerIcons = {
+                    microsoft: '🔷',
+                    okta: '🔵',
+                    google: '🔴',
+                    auth0: '🟠',
+                    onelogin: '🟢',
+                    keycloak: '🔶'
+                };
+                return (
+                    <Space>
+                        <span style={{ fontSize: 20 }}>{providerIcons[record.provider] || '🔗'}</span>
+                        <div>
+                            <Text strong>{record.template_name}</Text>
+                            <br />
+                            <Text type="secondary" style={{ fontSize: 12 }}>{record.provider}</Text>
+                        </div>
+                    </Space>
+                );
+            },
         },
         {
             title: 'Type',
-            dataIndex: 'provider_type',
-            key: 'provider_type',
-            render: (type) => {
-                const colors = { oidc: 'blue', saml: 'green', azure_ad: 'cyan', okta: 'purple', ldap: 'orange' };
-                return <Tag color={colors[type]}>{type.toUpperCase()}</Tag>;
+            dataIndex: 'connector_type',
+            key: 'connector_type',
+            render: (type) => <Tag color="blue">{type.toUpperCase()}</Tag>,
+        },
+        {
+            title: 'Category',
+            dataIndex: 'category',
+            key: 'category',
+            render: (category) => {
+                const colors = {
+                    SSO: 'purple',
+                    APPLICATION: 'orange',
+                    DIRECTORY: 'cyan',
+                    CLOUD: 'blue'
+                };
+                return <Tag color={colors[category] || 'default'}>{category}</Tag>;
             },
         },
         {
             title: 'Status',
             dataIndex: 'status',
             key: 'status',
-            render: (status) => {
+            render: (status, record) => {
                 const config = {
                     active: { status: 'success', text: 'Active' },
                     inactive: { status: 'default', text: 'Inactive' },
                     error: { status: 'error', text: 'Error' },
+                    pending: { status: 'warning', text: 'Pending' },
                 };
-                return <Badge {...(config[status] || { status: 'default', text: status })} />;
+                const badge = config[status] || { status: 'default', text: status };
+                return (
+                    <div>
+                        <Badge status={badge.status} text={badge.text} />
+                        {!record.is_enabled && <Tag color="red" style={{ marginLeft: 8 }}>Disabled</Tag>}
+                    </div>
+                );
             },
         },
         {
-            title: 'Created',
-            dataIndex: 'created_at',
-            key: 'created_at',
-            render: (d) => new Date(d).toLocaleDateString(),
+            title: 'Last Sync',
+            dataIndex: 'last_sync_at',
+            key: 'last_sync_at',
+            render: (date) => date ? new Date(date).toLocaleString() : <Text type="secondary">Never</Text>,
+        },
+        {
+            title: 'Actions',
+            key: 'actions',
+            render: (_, record) => (
+                <Space>
+                    <Tooltip title="View Details">
+                        <Button
+                            size="small"
+                            icon={<AuditOutlined />}
+                            onClick={() => showConnectorDetails(record.id)}
+                        />
+                    </Tooltip>
+                    <Tooltip title="Test Connection">
+                        <Button
+                            size="small"
+                            icon={<SyncOutlined spin={testing === record.id} />}
+                            onClick={() => handleTestConnector(record.id)}
+                            loading={testing === record.id}
+                        />
+                    </Tooltip>
+                    {record.category === 'SSO' && (
+                        <Tooltip title="Sync Identities">
+                            <Button
+                                size="small"
+                                icon={<CloudSyncOutlined />}
+                                onClick={() => handleSyncIdentities(record.id)}
+                                loading={syncing === record.id}
+                                disabled={!record.is_enabled}
+                            />
+                        </Tooltip>
+                    )}
+                    {(record.category === 'APPLICATION' || record.category === 'CLOUD') && (
+                        <Tooltip title="Sync Roles & Entitlements">
+                            <Button
+                                size="small"
+                                icon={<CloudSyncOutlined />}
+                                onClick={() => handleSyncResources(record.id)}
+                                loading={syncing === record.id}
+                                disabled={!record.is_enabled}
+                            />
+                        </Tooltip>
+                    )}
+                    <Popconfirm
+                        title="Delete this connector?"
+                        onConfirm={() => handleDeleteConnector(record.id)}
+                        okText="Yes"
+                        cancelText="No"
+                    >
+                        <Tooltip title="Delete">
+                            <Button size="small" danger icon={<DeleteOutlined />} />
+                        </Tooltip>
+                    </Popconfirm>
+                </Space>
+            ),
         },
     ];
 
@@ -430,22 +632,39 @@ function TenantDetail() {
             ),
         },
         {
-            key: 'idps',
+            key: 'connectors',
             label: (
                 <Space>
-                    <KeyOutlined />
-                    <span>Identity Providers ({idps.length})</span>
+                    <LinkOutlined />
+                    <span>Connectors ({connectors.length})</span>
                 </Space>
             ),
-            children: idps.length > 0 ? (
-                <Table
-                    dataSource={idps}
-                    columns={idpColumns}
-                    rowKey="id"
-                    pagination={false}
-                />
-            ) : (
-                <Empty description="No identity providers configured" />
+            children: (
+                <div>
+                    <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'flex-end' }}>
+                        <Button
+                            type="primary"
+                            icon={<PlusOutlined />}
+                            onClick={() => setConnectorModalOpen(true)}
+                        >
+                            Configure Connector
+                        </Button>
+                    </div>
+                    {connectors.length > 0 ? (
+                        <Table
+                            dataSource={connectors}
+                            columns={connectorColumns}
+                            rowKey="id"
+                            pagination={false}
+                        />
+                    ) : (
+                        <Empty description="No connectors configured for this tenant">
+                            <Button type="primary" onClick={() => setConnectorModalOpen(true)}>
+                                Configure First Connector
+                            </Button>
+                        </Empty>
+                    )}
+                </div>
             ),
         },
     ];
@@ -537,9 +756,9 @@ function TenantDetail() {
                 <Col span={6}>
                     <Card>
                         <Statistic
-                            title="Identity Providers"
-                            value={tenant.idp_count}
-                            prefix={<KeyOutlined />}
+                            title="Connectors"
+                            value={connectors.length}
+                            prefix={<LinkOutlined />}
                         />
                     </Card>
                 </Col>
@@ -669,6 +888,344 @@ function TenantDetail() {
                         </Space>
                     </Form.Item>
                 </Form>
+            </Modal>
+
+            {/* Configure Connector Modal */}
+            <Modal
+                title="Configure Connector"
+                open={connectorModalOpen}
+                onCancel={() => {
+                    setConnectorModalOpen(false);
+                    connectorForm.resetFields();
+                }}
+                footer={null}
+                width={600}
+            >
+                <Form form={connectorForm} layout="vertical" onFinish={(values) => {
+                    // Custom handling for Generic REST Application
+                    // We need to bundle the individual fields back into the JSON structure expected by the backend
+                    if (values.template_id) {
+                        const template = templates.find(t => t.id === values.template_id);
+                        if (template && template.slug === 'generic-rest-app') {
+                            const connection = {
+                                base_url: values.base_url,
+                                auth_type: values.auth_type,
+                                timeout_seconds: 30,
+                                retry_count: 3,
+                                auth_config: {}
+                            };
+
+                            if (values.auth_type === 'API_KEY') {
+                                connection.auth_config = {
+                                    header_name: values.api_key_header,
+                                    header_value: values.api_key_value
+                                };
+                            } else if (values.auth_type === 'BASIC') {
+                                connection.auth_config = {
+                                    username: values.basic_username,
+                                    password: values.basic_password
+                                };
+                            } else if (values.auth_type === 'OAUTH2') {
+                                connection.auth_config = {
+                                    token_url: values.oauth_token_url,
+                                    client_id: values.oauth_client_id,
+                                    client_secret: values.oauth_client_secret,
+                                    scope: values.oauth_scope
+                                };
+                            }
+
+                            const endpoints = [
+                                {
+                                    operation: 'FETCH_ROLES',
+                                    method: 'GET',
+                                    path: values.roles_endpoint,
+                                    enabled: !!values.roles_endpoint
+                                },
+                                {
+                                    operation: 'FETCH_ENTITLEMENTS',
+                                    method: 'GET',
+                                    path: values.entitlements_endpoint,
+                                    enabled: !!values.entitlements_endpoint
+                                }
+                            ];
+
+                            const response_mapping = {};
+                            if (values.roles_endpoint) {
+                                response_mapping['FETCH_ROLES'] = {
+                                    root_path: values.roles_root_path,
+                                    id_field: values.roles_id_field || 'id',
+                                    name_field: values.roles_name_field || 'name',
+                                    description_field: values.roles_desc_field
+                                };
+                            }
+                            if (values.entitlements_endpoint) {
+                                response_mapping['FETCH_ENTITLEMENTS'] = {
+                                    root_path: values.entitlements_root_path,
+                                    id_field: values.entitlements_id_field || 'id',
+                                    name_field: values.entitlements_name_field || 'name',
+                                    description_field: values.entitlements_desc_field
+                                };
+                            }
+
+                            // Overwrite the flat values with the structured JSON
+                            values.connection = connection;
+                            values.endpoints = endpoints;
+                            values.response_mapping = response_mapping;
+                        }
+                    }
+                    handleCreateConnector(values);
+                }}>
+                    <Form.Item name="category_filter" label="Connector Category">
+                        <Select
+                            placeholder="All Categories"
+                            allowClear
+                            onChange={() => connectorForm.setFieldsValue({ template_id: undefined })}
+                        >
+                            <Select.Option value="SSO">SSO</Select.Option>
+                            <Select.Option value="APPLICATION">Application</Select.Option>
+                            <Select.Option value="DIRECTORY">Directory</Select.Option>
+                            <Select.Option value="CLOUD">Cloud Infrastructure</Select.Option>
+                        </Select>
+                    </Form.Item>
+
+                    <Form.Item
+                        noStyle
+                        shouldUpdate={(prev, curr) => prev.category_filter !== curr.category_filter}
+                    >
+                        {({ getFieldValue }) => {
+                            const category = getFieldValue('category_filter');
+                            const filteredTemplates = category
+                                ? templates.filter(t => t.category === category)
+                                : templates;
+
+                            return (
+                                <Form.Item
+                                    name="template_id"
+                                    label="Connector Template"
+                                    rules={[{ required: true, message: 'Please select a connector template' }]}
+                                >
+                                    <Select placeholder="Select connector template">
+                                        {filteredTemplates.map(t => (
+                                            <Select.Option key={t.id} value={t.id}>
+                                                <Space>
+                                                    {t.name}
+                                                    <Tag style={{ marginLeft: 8 }} color={
+                                                        t.category === 'SSO' ? 'purple' :
+                                                            t.category === 'APPLICATION' ? 'orange' :
+                                                                t.category === 'DIRECTORY' ? 'cyan' : 'blue'
+                                                    }>
+                                                        {t.category}
+                                                    </Tag>
+                                                </Space>
+                                            </Select.Option>
+                                        ))}
+                                    </Select>
+                                </Form.Item>
+                            );
+                        }}
+                    </Form.Item>
+
+                    <Form.Item noStyle shouldUpdate={(prev, curr) => prev.template_id !== curr.template_id}>
+                        {() => {
+                            const templateId = connectorForm.getFieldValue('template_id');
+                            const template = templates.find(t => t.id === templateId);
+
+                            if (!template) return null;
+
+                            // Special handling for Generic REST Application
+                            if (template.slug === 'generic-rest-app') {
+                                return (
+                                    <>
+                                        <Card type="inner" title="Connection Settings" size="small" style={{ marginBottom: 16 }}>
+                                            <Form.Item name="base_url" label="Base URL" rules={[{ required: true }]}>
+                                                <Input placeholder="https://api.example.com" />
+                                            </Form.Item>
+                                            <Form.Item name="auth_type" label="Authentication Type" initialValue="NONE">
+                                                <Select>
+                                                    <Select.Option value="NONE">None</Select.Option>
+                                                    <Select.Option value="API_KEY">API Key</Select.Option>
+                                                    <Select.Option value="BASIC">Basic Auth</Select.Option>
+                                                    <Select.Option value="OAUTH2">OAuth2 (Client Creds)</Select.Option>
+                                                </Select>
+                                            </Form.Item>
+
+                                            <Form.Item noStyle shouldUpdate={(prev, curr) => prev.auth_type !== curr.auth_type}>
+                                                {({ getFieldValue }) => {
+                                                    const authType = getFieldValue('auth_type');
+                                                    if (authType === 'API_KEY') {
+                                                        return (
+                                                            <Space style={{ display: 'flex' }} align="start">
+                                                                <Form.Item name="api_key_header" label="Header Name" rules={[{ required: true }]}>
+                                                                    <Input placeholder="Authorization" />
+                                                                </Form.Item>
+                                                                <Form.Item name="api_key_value" label="Value" rules={[{ required: true }]}>
+                                                                    <Input.Password placeholder="Bearer <token>" />
+                                                                </Form.Item>
+                                                            </Space>
+                                                        );
+                                                    }
+                                                    if (authType === 'BASIC') {
+                                                        return (
+                                                            <Space style={{ display: 'flex' }} align="start">
+                                                                <Form.Item name="basic_username" label="Username" rules={[{ required: true }]}>
+                                                                    <Input />
+                                                                </Form.Item>
+                                                                <Form.Item name="basic_password" label="Password" rules={[{ required: true }]}>
+                                                                    <Input.Password />
+                                                                </Form.Item>
+                                                            </Space>
+                                                        );
+                                                    }
+                                                    if (authType === 'OAUTH2') {
+                                                        return (
+                                                            <>
+                                                                <Form.Item name="oauth_token_url" label="Token URL" rules={[{ required: true }]}>
+                                                                    <Input placeholder="https://auth.example.com/token" />
+                                                                </Form.Item>
+                                                                <Space style={{ display: 'flex' }} align="start">
+                                                                    <Form.Item name="oauth_client_id" label="Client ID" rules={[{ required: true }]}>
+                                                                        <Input />
+                                                                    </Form.Item>
+                                                                    <Form.Item name="oauth_client_secret" label="Client Secret" rules={[{ required: true }]}>
+                                                                        <Input.Password />
+                                                                    </Form.Item>
+                                                                </Space>
+                                                                <Form.Item name="oauth_scope" label="Scope">
+                                                                    <Input placeholder="read:users" />
+                                                                </Form.Item>
+                                                            </>
+                                                        );
+                                                    }
+                                                    return null;
+                                                }}
+                                            </Form.Item>
+                                        </Card>
+
+                                        <Card type="inner" title="Operations & Mapping" size="small">
+                                            <Tabs size="small" items={[
+                                                {
+                                                    key: 'roles',
+                                                    label: 'Fetch Roles',
+                                                    children: (
+                                                        <>
+                                                            <Form.Item name="roles_endpoint" label="Roles Endpoint (Path)">
+                                                                <Input placeholder="/v1/roles" />
+                                                            </Form.Item>
+                                                            <Space size="small">
+                                                                <Form.Item name="roles_root_path" label="Root JSON Path">
+                                                                    <Input placeholder="data.items" />
+                                                                </Form.Item>
+                                                                <Form.Item name="roles_id_field" label="ID Field">
+                                                                    <Input placeholder="id" />
+                                                                </Form.Item>
+                                                                <Form.Item name="roles_name_field" label="Name Field">
+                                                                    <Input placeholder="name" />
+                                                                </Form.Item>
+                                                            </Space>
+                                                        </>
+                                                    )
+                                                },
+                                                {
+                                                    key: 'entitlements',
+                                                    label: 'Fetch Entitlements',
+                                                    children: (
+                                                        <>
+                                                            <Form.Item name="entitlements_endpoint" label="Entitlements Endpoint (Path)">
+                                                                <Input placeholder="/v1/permissions" />
+                                                            </Form.Item>
+                                                            <Space size="small">
+                                                                <Form.Item name="entitlements_root_path" label="Root JSON Path">
+                                                                    <Input placeholder="data" />
+                                                                </Form.Item>
+                                                                <Form.Item name="entitlements_id_field" label="ID Field">
+                                                                    <Input placeholder="id" />
+                                                                </Form.Item>
+                                                                <Form.Item name="entitlements_name_field" label="Name Field">
+                                                                    <Input placeholder="code" />
+                                                                </Form.Item>
+                                                            </Space>
+                                                        </>
+                                                    )
+                                                }
+                                            ]} />
+                                        </Card>
+                                    </>
+                                );
+                            }
+
+                            // Default Generic Form for other templates
+                            return template.config_schema.fields.map(field => (
+                                <Form.Item
+                                    key={field.name}
+                                    name={field.name}
+                                    label={field.label}
+                                    rules={[{ required: field.required, message: `${field.label} is required` }]}
+                                >
+                                    {field.type === 'password' ? (
+                                        <Input.Password placeholder={field.placeholder} />
+                                    ) : field.type === 'select' ? (
+                                        <Select>
+                                            {field.options && field.options.map(opt => (
+                                                <Select.Option key={opt} value={opt}>{opt}</Select.Option>
+                                            ))}
+                                        </Select>
+                                    ) : (
+                                        <Input placeholder={field.placeholder} />
+                                    )}
+                                </Form.Item>
+                            ));
+                        }}
+                    </Form.Item>
+
+                    <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
+                        <Space>
+                            <Button onClick={() => setConnectorModalOpen(false)}>Cancel</Button>
+                            <Button type="primary" htmlType="submit">Configure</Button>
+                        </Space>
+                    </Form.Item>
+                </Form>
+            </Modal>
+
+            {/* Connector Details Modal */}
+            <Modal
+                title="Connector Details"
+                open={!!connectorDetailsModal}
+                onCancel={() => setConnectorDetailsModal(null)}
+                footer={<Button onClick={() => setConnectorDetailsModal(null)}>Close</Button>}
+                width={600}
+            >
+                {connectorDetailsModal && (
+                    <Descriptions column={1} bordered>
+                        <Descriptions.Item label="Connector">{connectorDetailsModal.template_name}</Descriptions.Item>
+                        <Descriptions.Item label="Provider">{connectorDetailsModal.provider}</Descriptions.Item>
+                        <Descriptions.Item label="Type">{connectorDetailsModal.connector_type}</Descriptions.Item>
+                        <Descriptions.Item label="Status">
+                            <Badge
+                                status={connectorDetailsModal.status === 'active' ? 'success' : 'warning'}
+                                text={connectorDetailsModal.status}
+                            />
+                        </Descriptions.Item>
+                        <Descriptions.Item label="Configuration">
+                            {Object.entries(connectorDetailsModal.config || {}).map(([key, value]) => (
+                                <div key={key}>
+                                    <Text strong>{key}:</Text> {value}
+                                </div>
+                            ))}
+                        </Descriptions.Item>
+                        <Descriptions.Item label="Last Sync">
+                            {connectorDetailsModal.last_sync_at ? new Date(connectorDetailsModal.last_sync_at).toLocaleString() : 'Never'}
+                        </Descriptions.Item>
+                        {connectorDetailsModal.sync_stats && Object.keys(connectorDetailsModal.sync_stats).length > 0 && (
+                            <Descriptions.Item label="Sync Stats">
+                                {Object.entries(connectorDetailsModal.sync_stats).map(([key, value]) => (
+                                    <div key={key}>
+                                        <Text>{key}: {value}</Text>
+                                    </div>
+                                ))}
+                            </Descriptions.Item>
+                        )}
+                    </Descriptions>
+                )}
             </Modal>
         </div>
     );

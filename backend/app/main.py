@@ -12,6 +12,7 @@ from app.config import get_settings
 from app.routes import identity, access, audit
 from app.routes import api_keys, connectors, access_reviews
 from app.routes import applications, grc, tenants
+from app.routes import connector_templates, tenant_connectors, application_connectors
 from app.auth.jwt import get_demo_token, authenticate_user, create_access_token
 
 # Configure logging
@@ -99,6 +100,9 @@ app.include_router(access_reviews.router)
 app.include_router(applications.router)
 app.include_router(tenants.router)
 app.include_router(grc.router)
+app.include_router(connector_templates.router)
+app.include_router(tenant_connectors.router)
+app.include_router(application_connectors.router)
 
 
 @app.get("/", tags=["Health"])

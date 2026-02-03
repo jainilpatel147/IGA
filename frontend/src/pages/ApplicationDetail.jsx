@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import {
     Card, Table, Button, Typography, Space, Tag, Spin, Descriptions,
-    Row, Col, Statistic, Badge, Breadcrumb, Empty, Progress
+    Row, Col, Statistic, Badge, Breadcrumb, Empty, Progress, Tabs
 } from 'antd'
 import {
     AppstoreOutlined,
@@ -13,15 +13,19 @@ import {
     ArrowLeftOutlined,
     AuditOutlined,
     PlusOutlined,
+    ApiOutlined,
+    SearchOutlined,
 } from '@ant-design/icons'
 import api from '../api/request'
 import { message, Modal, Form, Input } from 'antd'
+import ApplicationConnectors from '../components/ApplicationConnectors'
+import TenantDiscovery from '../components/TenantDiscovery'
 
 const { Title, Text } = Typography;
 
 /**
  * Application Detail Page
- * Shows application info with list of tenants and access reviews
+ * Shows application info with tabs for tenants, connectors, discovery, and reviews
  */
 function ApplicationDetail() {
     const { appId } = useParams();
@@ -32,6 +36,7 @@ function ApplicationDetail() {
     const [reviews, setReviews] = useState([]);
     const [loading, setLoading] = useState(true);
     const [isAddTenantModalVisible, setIsAddTenantModalVisible] = useState(false);
+    const [activeTab, setActiveTab] = useState('tenants');
     const [form] = Form.useForm();
 
     useEffect(() => {
@@ -51,9 +56,6 @@ function ApplicationDetail() {
             setTenants(tenantData);
 
             // Fetch access reviews
-            // Ideally backend would support ?application_id=... but for now we fetch all
-            // and filter if needed, or rely on the fact that reviews target resources
-            // associated with this app. For this implementation, we just show all reviews.
             const reviewData = await api.get('/access-reviews');
             setReviews(reviewData);
 
@@ -104,7 +106,7 @@ function ApplicationDetail() {
             key: 'tenant_type',
             render: (type) => {
                 const colors = { default: 'blue', customer: 'green' };
-                return <Tag color={colors[type]}>{type.toUpperCase()}</Tag>;
+                return <Tag color={colors[type]}>{type?.toUpperCase()}</Tag>;
             },
         },
         {
@@ -116,8 +118,24 @@ function ApplicationDetail() {
                     active: { status: 'success', text: 'Active' },
                     inactive: { status: 'default', text: 'Inactive' },
                     suspended: { status: 'error', text: 'Suspended' },
+                    pending: { status: 'warning', text: 'Pending' },
                 };
                 return <Badge {...(config[status] || { status: 'default', text: status })} />;
+            },
+        },
+        {
+            title: 'Onboarding',
+            dataIndex: 'onboarding_status',
+            key: 'onboarding_status',
+            render: (status) => {
+                if (!status || status === 'manually_created') return null;
+                const config = {
+                    pending_onboarding: { color: 'warning', text: 'Pending' },
+                    approved: { color: 'success', text: 'Approved' },
+                    rejected: { color: 'error', text: 'Rejected' },
+                };
+                const cfg = config[status] || { color: 'default', text: status };
+                return <Tag color={cfg.color}>{cfg.text}</Tag>;
             },
         },
         {
@@ -168,7 +186,7 @@ function ApplicationDetail() {
             key: 'status',
             render: (status) => {
                 const colors = { draft: 'default', active: 'processing', completed: 'success', cancelled: 'error' };
-                return <Tag color={colors[status]}>{status.toUpperCase()}</Tag>;
+                return <Tag color={colors[status]}>{status?.toUpperCase()}</Tag>;
             },
         },
         {
@@ -199,6 +217,107 @@ function ApplicationDetail() {
 
     const isCloud = application.deployment_type === 'cloud';
     const activeReviews = reviews.filter(r => r.status === 'active');
+
+    const tabItems = [
+        {
+            key: 'tenants',
+            label: (
+                <Space>
+                    <TeamOutlined />
+                    Tenants ({tenants.length})
+                </Space>
+            ),
+            children: (
+                <Card
+                    title={
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                            <Space>
+                                <TeamOutlined />
+                                <span>Tenants ({tenants.length})</span>
+                            </Space>
+                            {application.can_add_tenant !== false && (application.deployment_type === 'cloud' || tenants.length === 0) && (
+                                <Button
+                                    type="primary"
+                                    icon={<PlusOutlined />}
+                                    size="small"
+                                    onClick={() => setIsAddTenantModalVisible(true)}
+                                >
+                                    Add Tenant
+                                </Button>
+                            )}
+                        </div>
+                    }
+                >
+                    {tenants.length > 0 ? (
+                        <Table
+                            dataSource={tenants}
+                            columns={tenantColumns}
+                            rowKey="id"
+                            pagination={false}
+                        />
+                    ) : (
+                        <Empty description="No tenants configured" />
+                    )}
+                </Card>
+            ),
+        },
+        {
+            key: 'connectors',
+            label: (
+                <Space>
+                    <ApiOutlined />
+                    Connectors
+                    {isCloud && <Tag color="blue" size="small">Discovery</Tag>}
+                </Space>
+            ),
+            children: (
+                <ApplicationConnectors applicationId={appId} isCloud={isCloud} />
+            ),
+        },
+        {
+            key: 'discovery',
+            label: (
+                <Space>
+                    <SearchOutlined />
+                    Tenant Discovery
+                </Space>
+            ),
+            children: (
+                <TenantDiscovery applicationId={appId} isCloud={isCloud} />
+            ),
+        },
+        {
+            key: 'reviews',
+            label: (
+                <Space>
+                    <AuditOutlined />
+                    Access Reviews ({reviews.length})
+                </Space>
+            ),
+            children: (
+                <Card
+                    title={
+                        <Space>
+                            <AuditOutlined />
+                            <span>Access Reviews ({reviews.length})</span>
+                        </Space>
+                    }
+                    extra={<Link to="/access-reviews">Manage Reviews</Link>}
+                >
+                    {reviews.length > 0 ? (
+                        <Table
+                            dataSource={reviews}
+                            columns={reviewColumns}
+                            rowKey="id"
+                            pagination={false}
+                        />
+                    ) : (
+                        <Empty description="No access reviews found" />
+                    )}
+                </Card>
+            ),
+        },
+    ];
 
     return (
         <div>
@@ -231,7 +350,7 @@ function ApplicationDetail() {
                     ) : (
                         <Tag icon={<DesktopOutlined />} color="purple">ON-PREMISE (Single Tenant)</Tag>
                     )}
-                    <Badge status={application.status === 'active' ? 'success' : 'warning'} text={application.status.toUpperCase()} />
+                    <Badge status={application.status === 'active' ? 'success' : 'warning'} text={application.status?.toUpperCase()} />
                 </Space>
             </div>
 
@@ -268,7 +387,7 @@ function ApplicationDetail() {
                     <Card>
                         <Statistic
                             title="Integration"
-                            value={application.integration_type.toUpperCase()}
+                            value={application.integration_type?.toUpperCase()}
                             valueStyle={{ fontSize: 16 }}
                         />
                     </Card>
@@ -291,61 +410,14 @@ function ApplicationDetail() {
                 </Descriptions>
             </Card>
 
-            {/* Tenants Table */}
-            <Card
-                title={
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-                        <Space>
-                            <TeamOutlined />
-                            <span>Tenants ({tenants.length})</span>
-                        </Space>
-                        {application.can_add_tenant !== false && (application.deployment_type === 'cloud' || tenants.length === 0) && (
-                            <Button
-                                type="primary"
-                                icon={<PlusOutlined />}
-                                size="small"
-                                onClick={() => setIsAddTenantModalVisible(true)}
-                            >
-                                Add Tenant
-                            </Button>
-                        )}
-                    </div>
-                }
-                style={{ marginBottom: 24 }}
-            >
-                {tenants.length > 0 ? (
-                    <Table
-                        dataSource={tenants}
-                        columns={tenantColumns}
-                        rowKey="id"
-                        pagination={false}
-                    />
-                ) : (
-                    <Empty description="No tenants configured" />
-                )}
-            </Card>
+            {/* Tabbed Content */}
+            <Tabs
+                activeKey={activeTab}
+                onChange={setActiveTab}
+                items={tabItems}
+                size="large"
+            />
 
-            {/* Access Reviews Table */}
-            <Card
-                title={
-                    <Space>
-                        <AuditOutlined />
-                        <span>Access Reviews ({reviews.length})</span>
-                    </Space>
-                }
-                extra={<Link to="/access-reviews">Manage Reviews</Link>}
-            >
-                {reviews.length > 0 ? (
-                    <Table
-                        dataSource={reviews}
-                        columns={reviewColumns}
-                        rowKey="id"
-                        pagination={false}
-                    />
-                ) : (
-                    <Empty description="No access reviews found" />
-                )}
-            </Card>
             {/* Add Tenant Modal */}
             <Modal
                 title="Add New Tenant"
@@ -392,3 +464,4 @@ function ApplicationDetail() {
 }
 
 export default ApplicationDetail;
+
