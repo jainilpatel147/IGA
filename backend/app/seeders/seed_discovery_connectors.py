@@ -4,8 +4,11 @@ Seeds APPLICATION-scoped connectors that support tenant discovery
 """
 
 import uuid
+import logging
 from app.seeders.base import BaseSeeder
 from app.models import ConnectorTemplate
+
+logger = logging.getLogger(__name__)
 
 
 class DiscoveryConnectorSeeder(BaseSeeder):
@@ -134,6 +137,29 @@ class DiscoveryConnectorSeeder(BaseSeeder):
                     ]
                 },
                 "capabilities": ["tenant_discovery", "instance_discovery"]
+            },
+            {
+                "name": "Custom REST API Discovery",
+                "slug": "custom-rest-discovery",
+                "description": "Connect to any application REST API endpoint to discover tenants",
+                "provider": "custom",
+                "category": "APPLICATION",
+                "scope": "APPLICATION",
+                "supports_tenant_discovery": True,
+                "connector_type": "rest",
+                "config_schema": {
+                    "fields": [
+                        {"name": "base_url", "type": "string", "required": True, "label": "Application Base URL", "placeholder": "https://api.yourapp.com"},
+                        {"name": "tenants_endpoint", "type": "string", "required": True, "label": "Tenants Endpoint", "placeholder": "/api/v1/tenants", "default": "/api/tenants"},
+                        {"name": "auth_type", "type": "select", "required": True, "label": "Authentication Type", "options": ["Bearer Token", "API Key", "Basic Auth"], "default": "Bearer Token"},
+                        {"name": "auth_token", "type": "password", "required": True, "label": "Auth Token / API Key"},
+                        {"name": "auth_header", "type": "string", "required": False, "label": "Custom Auth Header Name", "placeholder": "Authorization", "default": "Authorization"},
+                        {"name": "tenant_id_field", "type": "string", "required": True, "label": "Tenant ID Field in Response", "default": "id"},
+                        {"name": "tenant_name_field", "type": "string", "required": True, "label": "Tenant Name Field in Response", "default": "name"},
+                        {"name": "response_path", "type": "string", "required": False, "label": "JSON Path to Tenants Array", "placeholder": "data.tenants", "default": "data"}
+                    ]
+                },
+                "capabilities": ["tenant_discovery", "custom_api"]
             }
         ]
         
@@ -148,13 +174,13 @@ class DiscoveryConnectorSeeder(BaseSeeder):
                     **template_data
                 )
                 db.add(template)
-                self.logger.info(f"Created discovery template: {template_data['name']}")
+                logger.info(f"Created discovery template: {template_data['name']}")
             else:
                 # Update scope and discovery capability if needed
                 if existing.scope != template_data["scope"]:
                     existing.scope = template_data["scope"]
                 if existing.supports_tenant_discovery != template_data["supports_tenant_discovery"]:
                     existing.supports_tenant_discovery = template_data["supports_tenant_discovery"]
-                self.logger.info(f"Updated discovery template: {template_data['name']}")
+                logger.info(f"Updated discovery template: {template_data['name']}")
         
         db.commit()
