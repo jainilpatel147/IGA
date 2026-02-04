@@ -915,7 +915,13 @@ function TenantDetail() {
                                 auth_config: {}
                             };
 
-                            if (values.auth_type === 'API_KEY') {
+                            if (values.auth_type === 'BEARER_TOKEN') {
+                                connection.auth_type = 'API_KEY';  // Backend uses API_KEY for bearer tokens
+                                connection.auth_config = {
+                                    header_name: 'Authorization',
+                                    header_value: `Bearer ${values.bearer_token}`
+                                };
+                            } else if (values.auth_type === 'API_KEY') {
                                 connection.auth_config = {
                                     header_name: values.api_key_header,
                                     header_value: values.api_key_value
@@ -932,6 +938,16 @@ function TenantDetail() {
                                     client_secret: values.oauth_client_secret,
                                     scope: values.oauth_scope
                                 };
+                            }
+
+                            // Parse and add custom headers if provided
+                            if (values.custom_headers) {
+                                try {
+                                    connection.custom_headers = JSON.parse(values.custom_headers);
+                                } catch (e) {
+                                    message.error('Invalid JSON format for custom headers');
+                                    return;
+                                }
                             }
 
                             const endpoints = [
@@ -1043,6 +1059,7 @@ function TenantDetail() {
                                             <Form.Item name="auth_type" label="Authentication Type" initialValue="NONE">
                                                 <Select>
                                                     <Select.Option value="NONE">None</Select.Option>
+                                                    <Select.Option value="BEARER_TOKEN">Bearer Token (Direct)</Select.Option>
                                                     <Select.Option value="API_KEY">API Key</Select.Option>
                                                     <Select.Option value="BASIC">Basic Auth</Select.Option>
                                                     <Select.Option value="OAUTH2">OAuth2 (Client Creds)</Select.Option>
@@ -1052,6 +1069,13 @@ function TenantDetail() {
                                             <Form.Item noStyle shouldUpdate={(prev, curr) => prev.auth_type !== curr.auth_type}>
                                                 {({ getFieldValue }) => {
                                                     const authType = getFieldValue('auth_type');
+                                                    if (authType === 'BEARER_TOKEN') {
+                                                        return (
+                                                            <Form.Item name="bearer_token" label="Bearer Token" rules={[{ required: true }]}>
+                                                                <Input.Password placeholder="Paste your Bearer Token here" />
+                                                            </Form.Item>
+                                                        );
+                                                    }
                                                     if (authType === 'API_KEY') {
                                                         return (
                                                             <Space style={{ display: 'flex' }} align="start">
@@ -1098,6 +1122,17 @@ function TenantDetail() {
                                                     }
                                                     return null;
                                                 }}
+                                            </Form.Item>
+
+                                            <Form.Item
+                                                name="custom_headers"
+                                                label="Custom Headers (Optional)"
+                                                tooltip="Add extra HTTP headers as JSON, e.g. {&quot;X-Custom-Header&quot;: &quot;value&quot;}"
+                                            >
+                                                <Input.TextArea
+                                                    placeholder='{"X-Custom-Header": "value", "X-Another": "value2"}'
+                                                    rows={2}
+                                                />
                                             </Form.Item>
                                         </Card>
 

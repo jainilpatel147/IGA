@@ -123,7 +123,7 @@ class TenantDiscoveryService:
         
         return connector
     
-    def trigger_discovery(
+    async def trigger_discovery(
         self,
         application_id: str,
         connector_id: str,
@@ -132,7 +132,7 @@ class TenantDiscoveryService:
         """
         Trigger tenant discovery for an application.
         
-        Creates a discovery job and executes synchronously.
+        Creates a discovery job and executes asynchronously.
         Returns the completed job with results.
         """
         # Validate connector
@@ -174,7 +174,7 @@ class TenantDiscoveryService:
         
         # Execute discovery
         try:
-            self._execute_discovery(job, connector)
+            await self._execute_discovery(job, connector)
         except Exception as e:
             job.mark_failed(str(e))
             self.db.commit()
@@ -188,7 +188,7 @@ class TenantDiscoveryService:
         
         return job
     
-    def _execute_discovery(
+    async def _execute_discovery(
         self,
         job: TenantDiscoveryJob,
         connector: ApplicationConnector
@@ -197,9 +197,8 @@ class TenantDiscoveryService:
         job.mark_started()
         self.db.commit()
         
-        # Fetch tenants from connector
-        # In a real implementation, this would call the actual connector
-        discovered_tenants = self._fetch_tenants(connector)
+        # Fetch tenants from connector using async HTTP call
+        discovered_tenants = await self._fetch_tenants(connector)
         
         # Reconcile with existing tenants
         created = 0
@@ -266,30 +265,129 @@ class TenantDiscoveryService:
             }
         )
     
-    def _fetch_tenants(self, connector: ApplicationConnector) -> List[DiscoveredTenant]:
+    async def _fetch_tenants(self, connector: ApplicationConnector) -> List[DiscoveredTenant]:
         """
-        Fetch tenants from external application.
+        Fetch tenants from external application using connector config.
         
-        In a real implementation, this would:
-        1. Load the connector handler based on template
-        2. Call connector.fetch_tenants() with config/credentials
-        3. Transform response to DiscoveredTenant objects
-        
-        For now, returns mock data to demonstrate the flow.
+        This method:
+        1. Uses the connector's config to make an HTTP call
+        2. Logs all request/response details for visibility
+        3. Transforms the response into DiscoveredTenant objects
         """
-        # Mock implementation - would be replaced with actual connector calls
-        return [
-            DiscoveredTenant(
-                external_id="org_demo_1",
-                name="Demo Organization 1",
-                metadata={"plan": "enterprise", "seats": 100}
-            ),
-            DiscoveredTenant(
-                external_id="org_demo_2",
-                name="Demo Organization 2",
-                metadata={"plan": "professional", "seats": 25}
-            ),
-        ]
+        from app.services.application_connector_service import ApplicationConnectorService
+        from app.schemas.application_connector_config import ConnectorOperation as ConfigOperation
+        
+        logger.info("=" * 60)
+        logger.info("TENANT DISCOVERY - HTTP CALL START")
+        logger.info("=" * 60)
+        logger.info(f"Connector Name: {connector.name}")
+        logger.info(f"Connector ID: {connector.id}")
+        logger.info(f"Application ID: {connector.application_id}")
+        
+        # Log config (mask sensitive fields)
+        safe_config = {}
+        for key, value in (connector.config or {}).items():
+            if any(s in key.lower() for s in ['secret', 'password', 'token', 'key']):
+                safe_config[key] = "********"
+            else:
+                safe_config[key] = value
+        logger.info(f"Config: {safe_config}")
+        
+        try:
+            # Transform flat config to nested ApplicationConnectorConfig format
+            flat_config = connector.config or {}
+            
+            # Build auth_config based on auth_type
+            auth_config = {}
+            auth_type = flat_config.get("auth_type", "NONE")
+            if auth_type == "Bearer Token" or auth_type == "API_KEY":
+                auth_type = "API_KEY"
+                auth_config = {
+                    "header_name": "Authorization",
+                    "header_value": f"Bearer {flat_config.get('auth_token', '')}"
+                }
+            elif auth_type == "BASIC":
+                auth_config = {
+                    "username": flat_config.get("username", ""),
+                    "password": flat_config.get("password", "")
+                }
+            elif auth_type == "OAUTH2":
+                auth_config = {
+                    "client_id": flat_config.get("client_id", ""),
+                    "client_secret": flat_config.get("client_secret", ""),
+                    "token_url": flat_config.get("token_url", "")
+                }
+            else:
+                auth_type = "NONE"
+            
+            # Build the nested config structure
+            nested_config = {
+                "connection": {
+                    "base_url": flat_config.get("base_url", ""),
+                    "auth_type": auth_type,
+                    "auth_config": auth_config,
+                    "custom_headers": flat_config.get("custom_headers", {}),
+                    "timeout_seconds": flat_config.get("timeout_seconds", 30)
+                },
+                "endpoints": [
+                    {
+                        "operation": "FETCH_TENANTS",
+                        "method": "GET",
+                        "path": flat_config.get("tenants_endpoint", "/api/tenants"),
+                        "enabled": True
+                    }
+                ],
+                "response_mapping": {
+                    "FETCH_TENANTS": {
+                        "id_field": flat_config.get("tenant_id_field", "id"),
+                        "name_field": flat_config.get("tenant_name_field", "name")
+                    }
+                }
+            }
+            
+            logger.info(f"Transformed config for HTTP call")
+            
+            # Execute the HTTP call (now properly awaited)
+            raw_results = await ApplicationConnectorService.execute_operation(
+                nested_config, 
+                ConfigOperation.FETCH_TENANTS
+            )
+            
+            logger.info("=" * 60)
+            logger.info("TENANT DISCOVERY - RESULTS")
+            logger.info("=" * 60)
+            logger.info(f"Total items discovered: {len(raw_results)}")
+            
+            # Log each discovered item
+            for idx, item in enumerate(raw_results, 1):
+                logger.info(f"  [{idx}] ID: {item.get('id')}, Name: {item.get('name')}")
+                if item.get('description'):
+                    logger.info(f"       Description: {item.get('description')}")
+            
+            # Transform to DiscoveredTenant objects
+            discovered = []
+            for item in raw_results:
+                discovered.append(DiscoveredTenant(
+                    external_id=str(item.get("id", "")),
+                    name=str(item.get("name", "Unknown")),
+                    metadata=item
+                ))
+            
+            logger.info("=" * 60)
+            logger.info(f"TENANT DISCOVERY - COMPLETE ({len(discovered)} tenants)")
+            logger.info("=" * 60)
+            
+            return discovered
+            
+        except Exception as e:
+            logger.error("=" * 60)
+            logger.error("TENANT DISCOVERY - FAILED")
+            logger.error("=" * 60)
+            logger.error(f"Error: {str(e)}")
+            logger.error(f"Error type: {type(e).__name__}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            raise
     
     def _reconcile_tenant(
         self,
@@ -495,13 +593,20 @@ class TenantDiscoveryService:
             if application and application.tenants:
                 tenant_id = application.tenants[0].id
             
+            # Extract action from event_type (e.g., TENANT_DISCOVERY_STARTED -> started)
+            action = event_type.split("_")[-1].lower() if event_type else "unknown"
+            
             event = AuditEvent(
                 tenant_id=tenant_id,
                 event_type=event_type,
+                action=action,  # Required NOT NULL field
                 actor="system",
+                decision="allow",  # Required NOT NULL field
                 details=details
             )
             self.db.add(event)
             self.db.commit()
         except Exception as e:
+            # Important: Rollback the session to prevent cascading failures
+            self.db.rollback()
             logger.warning(f"Failed to log audit event: {e}")

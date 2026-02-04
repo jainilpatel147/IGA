@@ -224,7 +224,14 @@ def list_tenants_by_application(
     db: Session = Depends(get_db),
     user: dict = Depends(get_current_user_with_role)
 ):
-    """List all tenants for a specific application"""
+    """List all approved tenants for a specific application.
+    
+    Only shows tenants that are approved or manually created.
+    Tenants with pending_onboarding status are not shown here - 
+    they must be approved via tenant discovery first.
+    """
+    from app.models.tenant import TenantOnboardingStatus
+    
     try:
         app_uuid = uuid.UUID(app_id)
     except ValueError:
@@ -234,7 +241,17 @@ def list_tenants_by_application(
     if not app:
         raise HTTPException(status_code=404, detail="Application not found")
     
-    tenants = db.query(Tenant).filter(Tenant.application_id == app_uuid).order_by(Tenant.created_at).all()
+    # Only show approved or manually created tenants
+    # Pending tenants must be approved via discovery approval workflow
+    approved_statuses = [
+        TenantOnboardingStatus.APPROVED.value,
+        TenantOnboardingStatus.MANUALLY_CREATED.value
+    ]
+    
+    tenants = db.query(Tenant).filter(
+        Tenant.application_id == app_uuid,
+        Tenant.onboarding_status.in_(approved_statuses)
+    ).order_by(Tenant.created_at).all()
     
     return [
         TenantResponse(

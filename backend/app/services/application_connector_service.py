@@ -63,6 +63,10 @@ class ApplicationConnectorService:
             token = await ApplicationConnectorService._fetch_oauth_token(config)
             headers["Authorization"] = f"{config.connection.auth_config.token_header_prefix} {token}"
 
+        # Apply custom headers if provided
+        if config.connection.custom_headers:
+            headers.update(config.connection.custom_headers)
+
         # 4. Execute Request
         url = f"{config.connection.base_url}{endpoint.path}"
         

@@ -13,9 +13,151 @@ from app.database import get_db
 from app.models.tenant_connector import TenantConnector, TenantConnectorStatus
 from app.models.connector_template import ConnectorTemplate
 from app.models.tenant import Tenant
+from app.models.role import Role
 from app.services.audit import AuditService
 
 router = APIRouter(prefix="/tenants/{tenant_id}/connectors", tags=["Tenant Connectors"])
+
+
+def build_nested_config(template: ConnectorTemplate, connector_config: Dict[str, Any], operation: str) -> Dict[str, Any]:
+    """
+    Build nested ApplicationConnectorConfig from template defaults + connector credentials.
+    
+    Handles two formats:
+    1. Already nested format: {"connection": {...}, "endpoints": [...]}
+    2. Flat format: {"base_url": "...", "auth_type": "...", ...}
+    """
+    # Check if config is already in nested format
+    if "connection" in connector_config and "endpoints" in connector_config:
+        # Already nested - use it directly but fix any endpoints missing required fields
+        import copy
+        nested = copy.deepcopy(connector_config)
+        
+        fallback_paths = {
+            "TEST_CONNECTION": "/api/health",
+            "FETCH_ROLES": "/api/roles", 
+            "FETCH_ENTITLEMENTS": "/api/entitlements",
+            "FETCH_IDENTITIES": "/api/users",
+            "FETCH_TENANTS": "/api/tenants"
+        }
+        
+        # Ensure all endpoints have required 'path' field
+        for ep in nested.get("endpoints", []):
+            if not ep.get("path"):
+                op = ep.get("operation", "")
+                ep["path"] = fallback_paths.get(op, "/api")
+        
+        # Check if the operation endpoint exists, if not add it
+        existing_ops = [ep.get("operation") for ep in nested.get("endpoints", [])]
+        if operation not in existing_ops:
+            # For TEST_CONNECTION, use an existing enabled endpoint's path
+            test_path = fallback_paths.get(operation, "/api")
+            if operation == "TEST_CONNECTION":
+                # Find first enabled endpoint with a valid path to use for testing
+                for ep in nested.get("endpoints", []):
+                    if ep.get("enabled") and ep.get("path"):
+                        test_path = ep.get("path")
+                        break
+            
+            nested["endpoints"].append({
+                "operation": operation,
+                "method": "GET",
+                "path": test_path,
+                "enabled": True
+            })
+        
+        return nested
+    
+    # Flat format - need to build nested structure
+    template_schema = template.config_schema or {}
+    template_defaults = template_schema.get("defaults", {})
+    oauth_config = template_schema.get("oauth", {})
+    
+    # Merge: connector config takes precedence over template defaults
+    flat_config = {**template_defaults, **connector_config}
+    
+    # Determine base_url from various sources
+    base_url = (
+        flat_config.get("base_url") or 
+        oauth_config.get("base_url") or 
+        template_defaults.get("base_url")
+    )
+    
+    # base_url is required for REST API connectors
+    if not base_url:
+        raise HTTPException(
+            status_code=400, 
+            detail="Missing required field 'base_url' in connector configuration. Please provide the API base URL."
+        )
+    
+    # Build auth_config based on auth_type
+    auth_config = {}
+    auth_type = flat_config.get("auth_type", template.connector_type.upper() if template.connector_type else "NONE")
+    
+    if auth_type in ("Bearer Token", "API_KEY", "bearer", "token"):
+        auth_type = "API_KEY"
+        auth_config = {
+            "header_name": flat_config.get("header_name", "Authorization"),
+            "header_value": f"Bearer {flat_config.get('auth_token', flat_config.get('access_token', ''))}"
+        }
+    elif auth_type in ("BASIC", "basic"):
+        auth_type = "BASIC"
+        auth_config = {
+            "username": flat_config.get("username", ""),
+            "password": flat_config.get("password", "")
+        }
+    elif auth_type in ("OAUTH2", "oauth2", "oauth"):
+        auth_type = "OAUTH2"
+        auth_config = {
+            "client_id": flat_config.get("client_id", ""),
+            "client_secret": flat_config.get("client_secret", ""),
+            "token_url": flat_config.get("token_url", oauth_config.get("token_url", ""))
+        }
+    else:
+        auth_type = "NONE"
+    
+    # Build endpoints based on operation
+    endpoints = []
+    if operation == "TEST_CONNECTION":
+        endpoints.append({
+            "operation": "TEST_CONNECTION",
+            "method": "GET",
+            "path": flat_config.get("test_endpoint", flat_config.get("health_endpoint", "/api/health")),
+            "enabled": True
+        })
+    elif operation == "FETCH_IDENTITIES":
+        endpoints.append({
+            "operation": "FETCH_IDENTITIES",
+            "method": "GET",
+            "path": flat_config.get("identities_endpoint", flat_config.get("users_endpoint", "/api/users")),
+            "enabled": True
+        })
+    elif operation == "FETCH_ROLES":
+        endpoints.append({
+            "operation": "FETCH_ROLES",
+            "method": "GET",
+            "path": flat_config.get("roles_endpoint", "/api/roles"),
+            "enabled": True
+        })
+    elif operation == "FETCH_ENTITLEMENTS":
+        endpoints.append({
+            "operation": "FETCH_ENTITLEMENTS",
+            "method": "GET",
+            "path": flat_config.get("entitlements_endpoint", "/api/entitlements"),
+            "enabled": True
+        })
+    
+    return {
+        "connection": {
+            "base_url": base_url,
+            "auth_type": auth_type,
+            "auth_config": auth_config,
+            "custom_headers": flat_config.get("custom_headers", {}),
+            "timeout_seconds": flat_config.get("timeout_seconds", 30)
+        },
+        "endpoints": endpoints,
+        "response_mapping": {}
+    }
 
 
 # Schemas
@@ -37,6 +179,7 @@ class TenantConnectorResponse(BaseModel):
     template_slug: str
     provider: str
     connector_type: str
+    category: str  # SSO, APPLICATION, DIRECTORY, CLOUD
     status: str
     is_enabled: bool
     last_sync_at: Optional[datetime]
@@ -169,6 +312,7 @@ def create_tenant_connector(
         template_slug=template.slug,
         provider=template.provider,
         connector_type=template.connector_type,
+        category=template.category,
         status=tenant_connector.status,
         is_enabled=tenant_connector.is_enabled,
         last_sync_at=tenant_connector.last_sync_at,
@@ -205,6 +349,7 @@ def list_tenant_connectors(tenant_id: str, db: Session = Depends(get_db)):
             template_slug=tmpl.slug,
             provider=tmpl.provider,
             connector_type=tmpl.connector_type,
+            category=tmpl.category,
             status=tc.status,
             is_enabled=tc.is_enabled,
             last_sync_at=tc.last_sync_at,
@@ -325,10 +470,14 @@ def update_tenant_connector(
 
 
 @router.post("/{connector_id}/test")
-def test_tenant_connector(tenant_id: str, connector_id: str, db: Session = Depends(get_db)):
-    """Test tenant connector connection"""
+async def test_tenant_connector(tenant_id: str, connector_id: str, db: Session = Depends(get_db)):
+    """Test tenant connector connection by making actual HTTP call"""
+    from app.services.application_connector_service import ApplicationConnectorService
+    from app.schemas.application_connector_config import ConnectorOperation as ConfigOperation
     import uuid
-    import random
+    import logging
+    
+    logger = logging.getLogger(__name__)
     
     try:
         tenant_uuid = uuid.UUID(tenant_id)
@@ -336,34 +485,80 @@ def test_tenant_connector(tenant_id: str, connector_id: str, db: Session = Depen
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid ID format")
     
-    tc = db.query(TenantConnector).filter(
+    result = db.query(TenantConnector, ConnectorTemplate).join(
+        ConnectorTemplate,
+        TenantConnector.template_id == ConnectorTemplate.id
+    ).filter(
         TenantConnector.id == connector_uuid,
         TenantConnector.tenant_id == tenant_uuid
     ).first()
     
-    if not tc:
+    if not result:
         raise HTTPException(status_code=404, detail="Connector not found")
     
-    # Simulate connection test (implement actual test in production)
-    success = random.choice([True, True, True, False])
+    tc, tmpl = result
     
-    if success:
+    logger.info("=" * 60)
+    logger.info("CONNECTOR TEST - START")
+    logger.info("=" * 60)
+    logger.info(f"Connector ID: {connector_id}")
+    logger.info(f"Tenant ID: {tenant_id}")
+    logger.info(f"Template: {tmpl.name}")
+    
+    # Log config (mask sensitive fields)
+    safe_config = {}
+    for key, value in (tc.config or {}).items():
+        if any(s in key.lower() for s in ['secret', 'password', 'token', 'key']):
+            safe_config[key] = "********"
+        else:
+            safe_config[key] = value
+    logger.info(f"Config: {safe_config}")
+    
+    try:
+        # Build nested config from template + connector credentials
+        nested_config = build_nested_config(tmpl, tc.config or {}, "TEST_CONNECTION")
+        logger.info(f"Built nested config with base_url: {nested_config['connection']['base_url']}")
+        logger.info(f"Full nested config: {nested_config}")
+        
+        # Execute test connection via ApplicationConnectorService
+        test_results = await ApplicationConnectorService.execute_operation(
+            nested_config, 
+            ConfigOperation.TEST_CONNECTION
+        )
+        
+        logger.info("=" * 60)
+        logger.info("CONNECTOR TEST - SUCCESS")
+        logger.info("=" * 60)
+        logger.info(f"Response items: {len(test_results)}")
+        
         tc.status = TenantConnectorStatus.ACTIVE.value
         tc.last_error = None
-        message = "Connection successful"
-    else:
+        db.commit()
+        
+        return {
+            "success": True,
+            "message": "Connection successful",
+            "connector_id": connector_id,
+            "tenant_id": tenant_id,
+            "response_items": len(test_results)
+        }
+        
+    except Exception as e:
+        logger.error("=" * 60)
+        logger.error("CONNECTOR TEST - FAILED")
+        logger.error("=" * 60)
+        logger.error(f"Error: {str(e)}")
+        
         tc.status = TenantConnectorStatus.ERROR.value
-        tc.last_error = "Connection timeout"
-        message = "Connection failed: timeout"
-    
-    db.commit()
-    
-    return {
-        "success": success,
-        "message": message,
-        "connector_id": connector_id,
-        "tenant_id": tenant_id
-    }
+        tc.last_error = str(e)
+        db.commit()
+        
+        return {
+            "success": False,
+            "message": f"Connection failed: {str(e)}",
+            "connector_id": connector_id,
+            "tenant_id": tenant_id
+        }
 
 
 @router.delete("/{connector_id}")
@@ -390,11 +585,15 @@ def delete_tenant_connector(tenant_id: str, connector_id: str, db: Session = Dep
     
     return {"message": "Connector deleted", "id": connector_id}
 @router.post("/{connector_id}/sync-identities")
-def sync_connector_identities(tenant_id: str, connector_id: str, db: Session = Depends(get_db)):
-    """Sync identities from SSO connector"""
+async def sync_connector_identities(tenant_id: str, connector_id: str, db: Session = Depends(get_db)):
+    """Sync identities from SSO connector by making actual HTTP call"""
     from app.services.connector_enforcer import ConnectorEnforcer, ConnectorOperation
+    from app.services.application_connector_service import ApplicationConnectorService
+    from app.schemas.application_connector_config import ConnectorOperation as ConfigOperation
     import uuid
-    import random
+    import logging
+    
+    logger = logging.getLogger(__name__)
     
     try:
         tenant_uuid = uuid.UUID(tenant_id)
@@ -418,24 +617,80 @@ def sync_connector_identities(tenant_id: str, connector_id: str, db: Session = D
     # ENFORCEMENT
     ConnectorEnforcer.validate_operation(tmpl.category, ConnectorOperation.FETCH_USERS)
     
-    # Simulate sync
-    tc.last_sync_at = datetime.utcnow()
-    tc.status = TenantConnectorStatus.ACTIVE.value
+    logger.info("=" * 60)
+    logger.info("IDENTITY SYNC - START")
+    logger.info("=" * 60)
+    logger.info(f"Connector ID: {connector_id}")
+    logger.info(f"Tenant ID: {tenant_id}")
+    logger.info(f"Template: {tmpl.name}")
     
-    users_synced = random.randint(10, 100)
-    tc.sync_stats = {
-        "identities_synced": users_synced,
-        "last_sync_duration_ms": random.randint(500, 3000),
-        "type": "identities"
-    }
+    # Log config (mask sensitive fields)
+    safe_config = {}
+    for key, value in (tc.config or {}).items():
+        if any(s in key.lower() for s in ['secret', 'password', 'token', 'key']):
+            safe_config[key] = "********"
+        else:
+            safe_config[key] = value
+    logger.info(f"Config: {safe_config}")
     
-    db.commit()
-    
-    return {
-        "success": True,
-        "message": f"Successfully synced {users_synced} identities",
-        "stats": tc.sync_stats
-    }
+    try:
+        # Build nested config from template + connector credentials
+        nested_config = build_nested_config(tmpl, tc.config or {}, "FETCH_IDENTITIES")
+        logger.info(f"Built nested config with base_url: {nested_config['connection']['base_url']}")
+        
+        # Execute FETCH_IDENTITIES via ApplicationConnectorService
+        identities = await ApplicationConnectorService.execute_operation(
+            nested_config, 
+            ConfigOperation.FETCH_IDENTITIES
+        )
+        
+        logger.info("=" * 60)
+        logger.info("IDENTITY SYNC - RESULTS")
+        logger.info("=" * 60)
+        logger.info(f"Total identities discovered: {len(identities)}")
+        
+        # Log each identity (first 10)
+        for idx, identity in enumerate(identities[:10], 1):
+            logger.info(f"  [{idx}] ID: {identity.get('id')}, Name: {identity.get('name')}")
+        if len(identities) > 10:
+            logger.info(f"  ... and {len(identities) - 10} more")
+        
+        # Update sync stats
+        tc.last_sync_at = datetime.utcnow()
+        tc.status = TenantConnectorStatus.ACTIVE.value
+        tc.sync_stats = {
+            "identities_synced": len(identities),
+            "last_sync_duration_ms": 0,  # Would calculate in real impl
+            "type": "identities"
+        }
+        
+        db.commit()
+        
+        logger.info("=" * 60)
+        logger.info(f"IDENTITY SYNC - COMPLETE ({len(identities)} identities)")
+        logger.info("=" * 60)
+        
+        return {
+            "success": True,
+            "message": f"Successfully synced {len(identities)} identities",
+            "stats": tc.sync_stats
+        }
+        
+    except Exception as e:
+        logger.error("=" * 60)
+        logger.error("IDENTITY SYNC - FAILED")
+        logger.error("=" * 60)
+        logger.error(f"Error: {str(e)}")
+        
+        tc.status = TenantConnectorStatus.ERROR.value
+        tc.last_error = str(e)
+        tc.last_sync_at = datetime.utcnow()
+        db.commit()
+        
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Identity sync failed: {str(e)}"
+        )
 
 
 @router.post("/{connector_id}/sync-resources")
@@ -445,6 +700,9 @@ async def sync_connector_resources(tenant_id: str, connector_id: str, db: Sessio
     from app.services.application_connector_service import ApplicationConnectorService, ConnectorOperation as ConfigOperation
     import uuid
     import random
+    import logging
+    
+    logger = logging.getLogger(__name__)
     
     try:
         tenant_uuid = uuid.UUID(tenant_id)
@@ -468,37 +726,121 @@ async def sync_connector_resources(tenant_id: str, connector_id: str, db: Sessio
     # ENFORCEMENT
     ConnectorEnforcer.validate_operation(tmpl.category, ConnectorOperation.FETCH_ROLES)
     
-    # 1. Execute Sync via Application Service if "APPLICATION" category
-    # (For now we assume Generic REST, but we could check template type/capabilities)
+    logger.info("=" * 60)
+    logger.info("RESOURCE SYNC - START")
+    logger.info("=" * 60)
+    logger.info(f"Connector ID: {connector_id}")
+    logger.info(f"Tenant ID: {tenant_id}")
+    logger.info(f"Template: {tmpl.name}")
+    logger.info(f"Category: {tmpl.category}")
+    
+    # Log config (mask sensitive fields)
+    safe_config = {}
+    for key, value in (tc.config or {}).items():
+        if any(s in key.lower() for s in ['secret', 'password', 'token', 'key']):
+            safe_config[key] = "********"
+        else:
+            safe_config[key] = value
+    logger.info(f"Config: {safe_config}")
     
     roles_synced = 0
     entitlements_synced = 0
+    roles = []
+    entitlements = []
     
     try:
         if tmpl.category == "APPLICATION":
-             # Execute FETCH_ROLES
+            # Build nested config from template + connector credentials
+            roles_config = build_nested_config(tmpl, tc.config or {}, "FETCH_ROLES")
+            # entitlements_config = build_nested_config(tmpl, tc.config or {}, "FETCH_ENTITLEMENTS")
+            logger.info(f"Built nested config with base_url: {roles_config['connection']['base_url']}")
+            
+            # Execute FETCH_ROLES
+            logger.info("Fetching roles...")
             roles = await ApplicationConnectorService.execute_operation(
-                tc.config, 
+                roles_config, 
                 ConfigOperation.FETCH_ROLES
             )
             roles_synced = len(roles)
+            logger.info(f"Roles discovered: {roles_synced}")
+            for idx, role in enumerate(roles[:5], 1):
+                logger.info(f"  [{idx}] ID: {role.get('id')}, Name: {role.get('name')}")
+            if len(roles) > 5:
+                logger.info(f"  ... and {len(roles) - 5} more")
             
-            # Execute FETCH_ENTITLEMENTS
-            entitlements = await ApplicationConnectorService.execute_operation(
-                tc.config, 
-                ConfigOperation.FETCH_ENTITLEMENTS
-            )
-            entitlements_synced = len(entitlements)
+            # Persist roles to database (upsert based on name)
+            roles_created = 0
+            roles_updated = 0
+            for role_data in roles:
+                role_name = str(role_data.get('name', role_data.get('id', 'Unknown')))
+                display_name = role_data.get('display_name') or role_data.get('name') or role_name
+                description = role_data.get('description', '')
+                
+                # Check if role already exists for this tenant
+                existing_role = db.query(Role).filter(
+                    Role.tenant_id == tc.tenant_id,
+                    Role.name == role_name
+                ).first()
+                
+                if existing_role:
+                    # Update existing role
+                    existing_role.display_name = display_name
+                    existing_role.description = description
+                    existing_role.extra_data = {
+                        'external_id': str(role_data.get('id', '')),
+                        'source': 'connector_sync',
+                        'connector_id': str(tc.id),
+                        'synced_at': datetime.utcnow().isoformat()
+                    }
+                    roles_updated += 1
+                else:
+                    # Create new role
+                    new_role = Role(
+                        tenant_id=tc.tenant_id,
+                        name=role_name,
+                        display_name=display_name,
+                        description=description,
+                        is_privileged=False,
+                        risk_level='low',
+                        is_system=False,
+                        extra_data={
+                            'external_id': str(role_data.get('id', '')),
+                            'source': 'connector_sync',
+                            'connector_id': str(tc.id),
+                            'synced_at': datetime.utcnow().isoformat()
+                        }
+                    )
+                    db.add(new_role)
+                    roles_created += 1
             
-            # TODO: Store these results in database (Roles/Entitlements tables)
-            # For now we just return the stats
+            db.flush()  # Flush to catch any DB errors
+            logger.info(f"Roles persisted: {roles_created} created, {roles_updated} updated")
+            
+            # Execute FETCH_ENTITLEMENTS - disabled for now
+            # logger.info("Fetching entitlements...")
+            # entitlements = await ApplicationConnectorService.execute_operation(
+            #     entitlements_config, 
+            #     ConfigOperation.FETCH_ENTITLEMENTS
+            # )
+            # entitlements_synced = len(entitlements)
+            # logger.info(f"Entitlements discovered: {entitlements_synced}")
+            # for idx, ent in enumerate(entitlements[:5], 1):
+            #     logger.info(f"  [{idx}] ID: {ent.get('id')}, Name: {ent.get('name')}")
+            # if len(entitlements) > 5:
+            #     logger.info(f"  ... and {len(entitlements) - 5} more")
             
         else:
-             # Fallback for other types or mocks
+            # Fallback for other types or mocks
+            logger.info(f"Category '{tmpl.category}' - using mock data")
             roles_synced = random.randint(5, 20)
             entitlements_synced = random.randint(20, 100)
             
     except Exception as e:
+        logger.error("=" * 60)
+        logger.error("RESOURCE SYNC - FAILED")
+        logger.error("=" * 60)
+        logger.error(f"Error: {str(e)}")
+        
         tc.last_error = str(e)
         tc.status = TenantConnectorStatus.ERROR.value
         db.commit()
@@ -511,11 +853,16 @@ async def sync_connector_resources(tenant_id: str, connector_id: str, db: Sessio
     tc.sync_stats = {
         "roles_synced": roles_synced,
         "entitlements_synced": entitlements_synced,
-        "last_sync_duration_ms": random.randint(100, 500), # Placeholder timing
+        "last_sync_duration_ms": 0,  # Would calculate in real impl
         "type": "resources"
     }
     
     db.commit()
+    
+    logger.info("=" * 60)
+    logger.info(f"RESOURCE SYNC - COMPLETE")
+    logger.info(f"  Roles: {roles_synced}, Entitlements: {entitlements_synced}")
+    logger.info("=" * 60)
     
     return {
         "success": True,

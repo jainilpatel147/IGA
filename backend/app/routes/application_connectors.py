@@ -123,7 +123,7 @@ async def trigger_tenant_discovery(
     service = TenantDiscoveryService(db)
     
     try:
-        job = service.trigger_discovery(
+        job = await service.trigger_discovery(
             application_id=str(application_id),
             connector_id=str(request.connector_id),
             triggered_by="admin"  # Would come from auth context

@@ -24,6 +24,8 @@ class ConnectorOperation(str, Enum):
     TEST_CONNECTION = "TEST_CONNECTION"
     FETCH_ROLES = "FETCH_ROLES"
     FETCH_ENTITLEMENTS = "FETCH_ENTITLEMENTS"
+    FETCH_TENANTS = "FETCH_TENANTS"  # For application connector tenant discovery
+    FETCH_IDENTITIES = "FETCH_IDENTITIES"  # For SSO connector identity sync
 
 class AuthConfig(BaseModel):
     # API Key
@@ -45,6 +47,7 @@ class ConnectionConfig(BaseModel):
     base_url: str = Field(..., description="Base URL for the application API")
     auth_type: AuthType = Field(default=AuthType.NONE)
     auth_config: AuthConfig = Field(default_factory=AuthConfig)
+    custom_headers: Dict[str, str] = Field(default_factory=dict, description="Optional custom HTTP headers")
     timeout_seconds: int = Field(default=30, ge=1, le=300)
     retry_count: int = Field(default=3, ge=0, le=5)
 

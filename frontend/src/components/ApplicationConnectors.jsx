@@ -56,7 +56,20 @@ function ApplicationConnectors({ applicationId, isCloud }) {
     async function handleCreateConnector(values) {
         try {
             setCreating(true);
-            await api.post(`/applications/${applicationId}/connectors`, values);
+
+            // Parse custom_headers if present
+            const payload = { ...values };
+            if (payload.config && payload.config.custom_headers) {
+                try {
+                    payload.config.custom_headers = JSON.parse(payload.config.custom_headers);
+                } catch (e) {
+                    message.error('Invalid JSON format for custom headers');
+                    setCreating(false);
+                    return;
+                }
+            }
+
+            await api.post(`/applications/${applicationId}/connectors`, payload);
             message.success('Application connector created successfully');
             setIsModalVisible(false);
             form.resetFields();
@@ -274,6 +287,17 @@ function ApplicationConnectors({ applicationId, isCloud }) {
                                     )}
                                 </Form.Item>
                             ))}
+
+                            <Form.Item
+                                name={['config', 'custom_headers']}
+                                label="Custom Headers (Optional)"
+                                tooltip="Add extra HTTP headers as JSON"
+                            >
+                                <Input.TextArea
+                                    placeholder='{"X-Custom-Header": "value"}'
+                                    rows={2}
+                                />
+                            </Form.Item>
                         </Card>
                     )}
                 </Form>
