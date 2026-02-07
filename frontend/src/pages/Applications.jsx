@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
     Card, Table, Button, Modal, Form, Input, Select, Tag, Typography,
-    Space, Badge, Spin, message, Tabs, Row, Col, Statistic, Tooltip
+    Space, Badge, Spin, message, Tabs, Row, Col, Statistic, Tooltip, Popconfirm
 } from 'antd'
 import {
     PlusOutlined,
@@ -14,6 +14,8 @@ import {
     SafetyCertificateOutlined,
     CloudOutlined,
     DesktopOutlined,
+    DeleteOutlined,
+    EyeOutlined,
 } from '@ant-design/icons'
 import { useAuth } from '../context/AuthContext'
 import api from '../api/request'
@@ -112,6 +114,16 @@ function Applications() {
         }
     }
 
+    async function handleDeleteApp(appId) {
+        try {
+            await api.delete(`/applications/${appId}`);
+            message.success('Application deleted successfully');
+            fetchApplications();
+        } catch (error) {
+            message.error('Failed to delete application');
+        }
+    }
+
     const columns = [
         {
             title: 'Application',
@@ -184,22 +196,35 @@ function Applications() {
                 <Space>
                     <Tooltip title="View Details">
                         <Button
-                            type="primary"
                             size="small"
-                            onClick={() => navigate(`/applications/${record.id}`)}
-                        >
-                            View
-                        </Button>
+                            icon={<EyeOutlined />}
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                navigate(`/applications/${record.id}`);
+                            }}
+                        />
                     </Tooltip>
-                    <Tooltip title="Manage entitlements">
-                        <Button size="small" icon={<SafetyCertificateOutlined />} onClick={() => openEntitlementModal(record)}>
-                            Entitlements
-                        </Button>
-                    </Tooltip>
-                    {user?.role === 'admin' && record.status === 'pending' && (
-                        <Button size="small" type="primary" onClick={() => updateStatus(record.id, 'active')}>
+                    {user?.role === 'super_admin' && record.status === 'pending' && (
+                        <Button size="small" type="primary" onClick={(e) => {
+                            e.stopPropagation();
+                            updateStatus(record.id, 'active');
+                        }}>
                             Activate
                         </Button>
+                    )}
+                    {user?.role === 'super_admin' && (
+                        <Popconfirm
+                            title="Delete this application?"
+                            description="This will delete all tenants, identities, and data associated with this application."
+                            onConfirm={() => handleDeleteApp(record.id)}
+                            okText="Yes, Delete"
+                            okType="danger"
+                            cancelText="Cancel"
+                        >
+                            <Tooltip title="Delete Application">
+                                <Button size="small" danger icon={<DeleteOutlined />} onClick={(e) => e.stopPropagation()} />
+                            </Tooltip>
+                        </Popconfirm>
                     )}
                 </Space>
             ),
@@ -249,7 +274,7 @@ function Applications() {
                     <Title level={2} style={{ margin: 0 }}>Applications</Title>
                     <Text type="secondary">Govern access to registered applications</Text>
                 </div>
-                {user?.role === 'admin' && (
+                {user?.role === 'super_admin' && (
                     <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
                         Register Application
                     </Button>
@@ -356,7 +381,7 @@ function Applications() {
                             pagination={false}
                             style={{ marginBottom: 16 }}
                         />
-                        {user?.role === 'admin' && (
+                        {user?.role === 'super_admin' && (
                             <Card size="small" title="Add Entitlement">
                                 <Form form={entitlementForm} layout="inline" onFinish={handleCreateEntitlement}>
                                     <Form.Item name="name" rules={[{ required: true }]}>

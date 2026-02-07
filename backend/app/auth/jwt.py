@@ -24,28 +24,14 @@ settings = get_settings()
 security = HTTPBearer(auto_error=False)
 
 
-# Demo users with passwords (in production, use database with hashed passwords)
-# IGA has simple roles: admin (manage platform) and user (request access)
-# GRC roles (compliance, auditor, reviewer) are managed as application entitlements
-DEMO_USERS = {
-    "admin": {
-        "username": "admin",
-        "password": "admin123",  # Demo only
-        "role": "admin",
-        "name": "IGA Administrator"
-    },
-    "user": {
-        "username": "user",
-        "password": "user123",  # Demo only
-        "role": "user",
-        "name": "Standard User"
-    }
-}
+# Demo users - kept for backward compatibility but login will check database first
+DEMO_USERS = {}
 
 
 def authenticate_user(username: str, password: str) -> Optional[dict]:
     """
     Authenticate user with username and password.
+    Now only checks database, no hardcoded users.
     
     Args:
         username: User's username
@@ -54,9 +40,7 @@ def authenticate_user(username: str, password: str) -> Optional[dict]:
     Returns:
         User dict if authenticated, None otherwise
     """
-    user = DEMO_USERS.get(username)
-    if user and user["password"] == password:
-        return user
+    # No longer using hardcoded demo users
     return None
 
 
@@ -68,7 +52,7 @@ def create_access_token(
     Create a JWT access token.
     
     Args:
-        data: Payload data to encode
+        data: Payload data to encode (should include: sub, role, application_id)
         expires_delta: Token validity duration
         
     Returns:
@@ -137,28 +121,29 @@ async def get_current_user(
     """
     Dependency to get current user from JWT token.
     
-    For demo purposes, returns a default admin user if no token provided.
-    
     Args:
         credentials: HTTP Bearer credentials
         
     Returns:
-        User info dict or None
+        User info dict with role and application_id
     """
-    # Demo mode: return admin if no token
     if not credentials:
-        return DEMO_USERS["admin"]
+        return None
     
     try:
         payload = decode_token(credentials.credentials)
         username = payload.get("sub")
-        if username and username in DEMO_USERS:
-            return DEMO_USERS[username]
+        role = payload.get("role", "app_admin")
+        application_id = payload.get("application_id")
+        
+        # Return user from token payload
+        return {
+            "username": username,
+            "role": role,
+            "application_id": application_id
+        }
     except JWTError:
-        pass
-    
-    # Fall back to admin for demo
-    return DEMO_USERS["admin"]
+        return None
 
 
 async def require_auth(

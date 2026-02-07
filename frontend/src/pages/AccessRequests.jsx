@@ -139,18 +139,44 @@ function AccessRequests() {
             title: 'Identity',
             dataIndex: 'identity_id',
             key: 'identity_id',
-            render: (id) => <Text strong>{getIdentityName(id)}</Text>,
+            render: (id, record) => {
+                // Check if this is an identity creation request
+                if (record.extra_data?.request_type === 'identity_creation') {
+                    const data = record.extra_data.identity_data || {};
+                    return (
+                        <Space direction="vertical" size={0}>
+                            <Text strong>{data.name}</Text>
+                            <Text type="secondary" style={{ fontSize: 12 }}>{data.email} ({data.identity_type})</Text>
+                            <Tag color="cyan" style={{ marginTop: 4 }}>New Identity</Tag>
+                        </Space>
+                    );
+                }
+                // Regular access request
+                return <Text strong>{getIdentityName(id)}</Text>;
+            },
         },
         {
             title: 'Resource',
             dataIndex: 'resource',
             key: 'resource',
+            render: (text, record) => {
+                if (record.extra_data?.request_type === 'identity_creation') {
+                    return <Text type="secondary">Identity Platform</Text>;
+                }
+                return text;
+            }
         },
         {
             title: 'Role',
             dataIndex: 'role',
             key: 'role',
-            render: (role) => <Text code>{role}</Text>,
+            render: (role, record) => {
+                if (record.extra_data?.request_type === 'identity_creation') {
+                    const type = record.extra_data.identity_data?.identity_type || 'user';
+                    return <Tag color="blue">{type.toUpperCase()}</Tag>;
+                }
+                return <Text code>{role}</Text>;
+            }
         },
         {
             title: 'Risk',

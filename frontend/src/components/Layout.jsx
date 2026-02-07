@@ -18,6 +18,7 @@ import {
     AppstoreOutlined,
     FileProtectOutlined,
     UnlockOutlined,
+    CheckCircleOutlined,
 } from '@ant-design/icons'
 import { useTheme } from '../context/ThemeContext'
 import { useAuth } from '../context/AuthContext'
@@ -28,10 +29,19 @@ const { Text } = Typography;
 // IGA has simple roles: admin and user
 // GRC roles (compliance, auditor, reviewer) are managed as application entitlements
 const ROLE_MENUS = {
+    super_admin: [
+        '/', '/identities', '/access-requests', '/roles', '/resources',
+        '/applications', '/access-reviews', '/audit', '/compliance',
+        '/evidence', '/api-keys', '/connectors', '/users'
+    ],
+    app_admin: [
+        '/', '/identities', '/access-requests', '/applications',
+        '/access-reviews', '/audit', '/connectors', '/users'
+    ],
     admin: [
         '/', '/identities', '/access-requests', '/roles', '/resources',
         '/applications', '/access-reviews', '/audit', '/compliance',
-        '/evidence', '/api-keys', '/connectors'
+        '/evidence', '/api-keys', '/connectors', '/users'
     ],
     user: ['/', '/my-access', '/access-requests', '/applications'],
 };
@@ -89,6 +99,12 @@ function Layout() {
                     icon: <AppstoreOutlined />,
                     label: 'Application Registry',
                 },
+                {
+                    key: '/users',
+                    icon: <UserOutlined />,
+                    label: 'User Management',
+                },
+
             ],
         },
         // Identity Management (Admin only)
@@ -170,6 +186,8 @@ function Layout() {
     const menuItems = filterByRole(allMenuItems);
 
     const roleColors = {
+        super_admin: 'red',
+        app_admin: 'blue',
         admin: 'red',
         user: 'green',
     };

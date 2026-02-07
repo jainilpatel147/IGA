@@ -21,6 +21,7 @@ export function AuthProvider({ children }) {
                 setUser({
                     username: payload.sub,
                     role: payload.role,
+                    application_id: payload.application_id,
                     exp: payload.exp
                 });
             } catch {

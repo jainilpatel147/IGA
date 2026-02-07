@@ -99,6 +99,27 @@ async def get_application_connector(
     return ApplicationConnectorResponse.model_validate(connector)
 
 
+@router.delete("/{application_id}/connectors/{connector_id}")
+async def delete_application_connector(
+    application_id: UUID,
+    connector_id: UUID,
+    db: Session = Depends(get_db)
+):
+    """Delete an application connector"""
+    connector = db.query(ApplicationConnector).filter(
+        ApplicationConnector.id == connector_id,
+        ApplicationConnector.application_id == application_id
+    ).first()
+    
+    if not connector:
+        raise HTTPException(status_code=404, detail="Connector not found")
+    
+    db.delete(connector)
+    db.commit()
+    
+    return {"message": "Connector deleted successfully", "id": str(connector_id)}
+
+
 # =============================================================================
 # Tenant Discovery Endpoints
 # =============================================================================

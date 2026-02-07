@@ -20,10 +20,12 @@ import {
     SyncOutlined,
     EyeOutlined,
     LinkOutlined,
-    CloudSyncOutlined
+    CloudSyncOutlined,
+    EditOutlined
 } from '@ant-design/icons'
 import api from '../api/request'
 import { useAuth } from '../context/AuthContext'
+import ConnectorSelectionModal from '../components/ConnectorSelectionModal'
 
 const { Title, Text } = Typography;
 const { Option } = Select;
@@ -50,6 +52,7 @@ function TenantDetail() {
     const [createModalOpen, setCreateModalOpen] = useState(false);
     const [assignRoleModalOpen, setAssignRoleModalOpen] = useState(false);
     const [connectorModalOpen, setConnectorModalOpen] = useState(false);
+    const [editConnectorModal, setEditConnectorModal] = useState(null);
     const [connectorDetailsModal, setConnectorDetailsModal] = useState(null);
     const [selectedIdentity, setSelectedIdentity] = useState(null);
     const [identityRoles, setIdentityRoles] = useState({});
@@ -58,6 +61,10 @@ function TenantDetail() {
     const [roleForm] = Form.useForm();
     const [connectorForm] = Form.useForm();
     const [syncing, setSyncing] = useState(null);
+
+    // Connector selection states
+    const [connectorSelectionVisible, setConnectorSelectionVisible] = useState(false);
+    const [connectorSelectionOperation, setConnectorSelectionOperation] = useState(null);
 
     useEffect(() => {
         fetchData();
@@ -159,6 +166,16 @@ function TenantDetail() {
         }
     }
 
+    async function handleDeleteRole(roleId) {
+        try {
+            await api.delete(`/tenants/${tenantId}/roles/${roleId}`);
+            message.success('Role deleted successfully');
+            fetchData();
+        } catch (error) {
+            message.error('Failed to delete role');
+        }
+    }
+
     async function handleCreateConnector(values) {
         try {
             const template = templates.find(t => t.id === values.template_id);
@@ -218,6 +235,30 @@ function TenantDetail() {
         }
     }
 
+    async function handleUpdateConnector(values) {
+        try {
+            const connector = editConnectorModal;
+            const template = templates.find(t => t.id === connector.template_id);
+
+            const config = {};
+            template.config_schema.fields.forEach(field => {
+                if (values[field.name]) {
+                    config[field.name] = values[field.name];
+                }
+            });
+
+            await api.patch(`/tenants/${tenantId}/connectors/${connector.id}`, { config });
+
+            message.success('Connector updated successfully');
+            setEditConnectorModal(null);
+            connectorForm.resetFields();
+            fetchData();
+        } catch (error) {
+            console.error('Connector update error:', error);
+            message.error(error.message || 'Failed to update connector');
+        }
+    }
+
     const handleDeleteConnector = async (connectorId) => {
         try {
             await api.delete(`/tenants/${tenantId}/connectors/${connectorId}`);
@@ -256,12 +297,56 @@ function TenantDetail() {
         }
     }
 
+    // NEW: Connector-driven sync handlers
+    const handleSyncUsersViaConnector = () => {
+        setConnectorSelectionOperation({
+            type: 'sync_users',
+            capability: 'fetch_users',
+            title: 'Sync Users'
+        });
+        setConnectorSelectionVisible(true);
+    };
+
+    const handleSyncRolesViaConnector = () => {
+        setConnectorSelectionOperation({
+            type: 'sync_roles',
+            capability: 'fetch_roles',
+            title: 'Sync Roles'
+        });
+        setConnectorSelectionVisible(true);
+    };
+
+    const handleConnectorSelected = async (connector) => {
+        if (!connectorSelectionOperation) return;
+
+        setSyncing(connector.id);
+        setConnectorSelectionVisible(false);
+
+        try {
+            let response;
+            if (connectorSelectionOperation.type === 'sync_users') {
+                response = await api.post(`/tenants/${tenantId}/connectors/${connector.id}/sync-users`);
+                message.success(`Synced ${response.total_fetched} users from ${connector.name}`);
+            } else if (connectorSelectionOperation.type === 'sync_roles') {
+                response = await api.post(`/tenants/${tenantId}/connectors/${connector.id}/sync-roles`);
+                message.success(`Synced ${response.total_fetched} roles from ${connector.name}`);
+            }
+            fetchData();
+        } catch (error) {
+            const errorMsg = error.response?.data?.detail || 'Sync failed';
+            message.error(errorMsg);
+        } finally {
+            setSyncing(null);
+            setConnectorSelectionOperation(null);
+        }
+    };
+
     async function showConnectorDetails(connectorId) {
         try {
             const data = await api.get(`/tenants/${tenantId}/connectors/${connectorId}`);
             setConnectorDetailsModal(data);
         } catch (error) {
-            message.error('Failed to load details');
+            message.error('Failed to load connector details');
         }
     }
 
@@ -406,6 +491,24 @@ function TenantDetail() {
             key: 'created_at',
             render: (d) => new Date(d).toLocaleDateString(),
         },
+        {
+            title: 'Actions',
+            key: 'actions',
+            render: (_, record) => (
+                <Popconfirm
+                    title="Delete this role?"
+                    description="This will remove the role from all identities."
+                    onConfirm={() => handleDeleteRole(record.id)}
+                    okText="Yes, Delete"
+                    okType="danger"
+                    cancelText="Cancel"
+                >
+                    <Tooltip title="Delete Role">
+                        <Button size="small" danger icon={<DeleteOutlined />} />
+                    </Tooltip>
+                </Popconfirm>
+            ),
+        },
     ];
 
     const entitlementColumns = [
@@ -504,6 +607,19 @@ function TenantDetail() {
             key: 'actions',
             render: (_, record) => (
                 <Space>
+                    <Tooltip title="Edit Configuration">
+                        <Button
+                            size="small"
+                            icon={<EditOutlined />}
+                            onClick={async () => {
+                                const data = await api.get(`/tenants/${tenantId}/connectors/${record.id}`);
+                                setEditConnectorModal(data);
+                                const template = templates.find(t => t.id === data.template_id);
+                                const formValues = { ...data.config };
+                                connectorForm.setFieldsValue(formValues);
+                            }}
+                        />
+                    </Tooltip>
                     <Tooltip title="View Details">
                         <Button
                             size="small"
@@ -567,7 +683,14 @@ function TenantDetail() {
             ),
             children: (
                 <div>
-                    <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'flex-end' }}>
+                    <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Button
+                            icon={<CloudSyncOutlined />}
+                            onClick={handleSyncUsersViaConnector}
+                            loading={syncing !== null}
+                        >
+                            Sync via Connector
+                        </Button>
                         <Button
                             type="primary"
                             icon={<UserAddOutlined />}
@@ -601,15 +724,28 @@ function TenantDetail() {
                     <span>Roles ({roles.length})</span>
                 </Space>
             ),
-            children: roles.length > 0 ? (
-                <Table
-                    dataSource={roles}
-                    columns={roleColumns}
-                    rowKey="id"
-                    pagination={false}
-                />
-            ) : (
-                <Empty description="No roles defined for this tenant" />
+            children: (
+                <div>
+                    <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'flex-end' }}>
+                        <Button
+                            icon={<CloudSyncOutlined />}
+                            onClick={handleSyncRolesViaConnector}
+                            loading={syncing !== null}
+                        >
+                            Sync via Connector
+                        </Button>
+                    </div>
+                    {roles.length > 0 ? (
+                        <Table
+                            dataSource={roles}
+                            columns={roleColumns}
+                            rowKey="id"
+                            pagination={false}
+                        />
+                    ) : (
+                        <Empty description="No roles defined for this tenant" />
+                    )}
+                </div>
             ),
         },
         {
@@ -1247,6 +1383,22 @@ function TenantDetail() {
                                 </div>
                             ))}
                         </Descriptions.Item>
+                        <Descriptions.Item label="Supported Methods">
+                            {(() => {
+                                const fromDetails = connectorDetailsModal.supported_operations;
+                                const fromTemplate = templates.find(t => t.id === connectorDetailsModal.template_id)?.config_schema?.supported_operations;
+                                const ops = fromDetails && fromDetails.length ? fromDetails : (fromTemplate || []);
+                                return ops.length > 0 ? (
+                                    <Space wrap size={[4, 4]}>
+                                        {ops.map(op => (
+                                            <Tag key={op} color="blue">{op}</Tag>
+                                        ))}
+                                    </Space>
+                                ) : (
+                                    <Text type="secondary">No methods defined</Text>
+                                );
+                            })()}
+                        </Descriptions.Item>
                         <Descriptions.Item label="Last Sync">
                             {connectorDetailsModal.last_sync_at ? new Date(connectorDetailsModal.last_sync_at).toLocaleString() : 'Never'}
                         </Descriptions.Item>
@@ -1262,6 +1414,56 @@ function TenantDetail() {
                     </Descriptions>
                 )}
             </Modal>
+
+            {/* Edit Connector Modal */}
+            <Modal
+                title="Edit Connector Configuration"
+                open={!!editConnectorModal}
+                onCancel={() => {
+                    setEditConnectorModal(null);
+                    connectorForm.resetFields();
+                }}
+                footer={null}
+                width={600}
+            >
+                {editConnectorModal && (
+                    <Form form={connectorForm} layout="vertical" onFinish={handleUpdateConnector}>
+                        {templates.find(t => t.id === editConnectorModal.template_id)?.config_schema.fields.map(field => (
+                            <Form.Item
+                                key={field.name}
+                                name={field.name}
+                                label={field.label}
+                                rules={[{ required: field.required, message: `${field.label} is required` }]}
+                            >
+                                {field.type === 'password' ? (
+                                    <Input.Password placeholder={field.placeholder} />
+                                ) : (
+                                    <Input placeholder={field.placeholder} />
+                                )}
+                            </Form.Item>
+                        ))}
+                        <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
+                            <Space>
+                                <Button onClick={() => setEditConnectorModal(null)}>Cancel</Button>
+                                <Button type="primary" htmlType="submit">Update</Button>
+                            </Space>
+                        </Form.Item>
+                    </Form>
+                )}
+            </Modal>
+
+            {/* Connector Selection Modal */}
+            <ConnectorSelectionModal
+                visible={connectorSelectionVisible}
+                onClose={() => {
+                    setConnectorSelectionVisible(false);
+                    setConnectorSelectionOperation(null);
+                }}
+                onSelect={handleConnectorSelected}
+                tenantId={tenantId}
+                capability={connectorSelectionOperation?.capability || ''}
+                operationTitle={connectorSelectionOperation?.title || ''}
+            />
         </div>
     );
 }

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import {
     Card, Table, Button, Typography, Space, Tag, Spin, Descriptions,
-    Row, Col, Statistic, Badge, Breadcrumb, Empty, Progress, Tabs
+    Row, Col, Statistic, Badge, Breadcrumb, Empty, Progress, Tabs, Popconfirm, Tooltip
 } from 'antd'
 import {
     AppstoreOutlined,
@@ -15,6 +15,7 @@ import {
     PlusOutlined,
     ApiOutlined,
     SearchOutlined,
+    DeleteOutlined,
 } from '@ant-design/icons'
 import api from '../api/request'
 import { message, Modal, Form, Input } from 'antd'
@@ -80,6 +81,16 @@ function ApplicationDetail() {
         } catch (error) {
             console.error('Failed to create tenant:', error);
             message.error(error.message || 'Failed to create tenant');
+        }
+    }
+
+    async function handleDeleteTenant(tenantId) {
+        try {
+            await api.delete(`/tenants/${tenantId}`);
+            message.success('Tenant deleted successfully');
+            fetchData();
+        } catch (error) {
+            message.error('Failed to delete tenant');
         }
     }
 
@@ -154,13 +165,27 @@ function ApplicationDetail() {
             title: 'Actions',
             key: 'actions',
             render: (_, record) => (
-                <Button
-                    type="primary"
-                    size="small"
-                    onClick={() => navigate(`/applications/${appId}/tenants/${record.id}`)}
-                >
-                    View Details
-                </Button>
+                <Space>
+                    <Button
+                        type="primary"
+                        size="small"
+                        onClick={() => navigate(`/applications/${appId}/tenants/${record.id}`)}
+                    >
+                        View Details
+                    </Button>
+                    <Popconfirm
+                        title="Delete this tenant?"
+                        description="This will delete all identities, roles, and data in this tenant."
+                        onConfirm={() => handleDeleteTenant(record.id)}
+                        okText="Yes, Delete"
+                        okType="danger"
+                        cancelText="Cancel"
+                    >
+                        <Tooltip title="Delete Tenant">
+                            <Button size="small" danger icon={<DeleteOutlined />} />
+                        </Tooltip>
+                    </Popconfirm>
+                </Space>
             ),
         },
     ];

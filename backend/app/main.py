@@ -5,15 +5,18 @@ FastAPI entry point with CORS, routes, and database initialization
 
 import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, status
+from datetime import datetime
+from fastapi import FastAPI, HTTPException, status, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.routes import identity, access, audit
 from app.routes import api_keys, connectors, access_reviews
-from app.routes import applications, grc, tenants
+from app.routes import applications, grc, tenants, users
 from app.routes import connector_templates, tenant_connectors, application_connectors
-from app.auth.jwt import get_demo_token, authenticate_user, create_access_token
+from app.auth.jwt import authenticate_user, create_access_token
+from app.database import get_db
 
 # Configure logging
 logging.basicConfig(
@@ -30,10 +33,6 @@ async def lifespan(app: FastAPI):
     """Application lifespan handler for startup/shutdown"""
     # Startup
     logger.info("Starting IGA Platform...")
-    
-    # Generate demo token for convenience
-    demo_token = get_demo_token("admin")
-    logger.info(f"Demo admin token: {demo_token}")
     
     yield
     
@@ -103,6 +102,7 @@ app.include_router(grc.router)
 app.include_router(connector_templates.router)
 app.include_router(tenant_connectors.router)
 app.include_router(application_connectors.router)
+app.include_router(users.router)
 
 
 @app.get("/", tags=["Health"])
@@ -125,21 +125,6 @@ async def health_check():
     }
 
 
-@app.get("/auth/demo-token", tags=["Auth"])
-async def get_demo_auth_token(username: str = "admin"):
-    """
-    Get a demo JWT token for testing.
-    
-    - **username**: admin or user
-    """
-    token = get_demo_token(username)
-    return {
-        "access_token": token,
-        "token_type": "bearer",
-        "username": username
-    }
-
-
 from pydantic import BaseModel
 
 class LoginRequest(BaseModel):
@@ -149,28 +134,72 @@ class LoginRequest(BaseModel):
 
 
 @app.post("/auth/login", tags=["Auth"])
-async def login(request: LoginRequest):
+async def login(request: LoginRequest, db: Session = Depends(get_db)):
     """
     Authenticate user and return JWT token.
     
-    Demo credentials:
-    - admin / admin123
-    - user / user123
+    Checks database for users (super_admin and app_admin).
     """
-    user = authenticate_user(request.username, request.password)
+    from app.models.iga_user import IGAUser
+    import hashlib
     
-    if not user:
+    logger.info(f"Login attempt for username: {request.username}")
+    
+    # Check database for users
+    db_user = db.query(IGAUser).filter(
+        IGAUser.username == request.username,
+        IGAUser.is_active == True
+    ).first()
+    
+    if not db_user:
+        logger.warning(f"User not found: {request.username}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username or password",
             headers={"WWW-Authenticate": "Bearer"}
         )
     
-    token = create_access_token(data={"sub": user["username"], "role": user["role"]})
+    # Simple password check (in production, use proper hashing)
+    password_hash = hashlib.sha256(request.password.encode()).hexdigest()
+    logger.info(f"Password hash: {password_hash[:20]}...")
+    logger.info(f"Stored hash: {db_user.password_hash[:20]}...")
+    
+    if db_user.password_hash != password_hash:
+        logger.warning(f"Invalid password for user: {request.username}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid username or password",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+    
+    user = {
+        "username": db_user.username,
+        "role": db_user.role,
+        "name": db_user.full_name,
+        "application_id": str(db_user.application_id) if db_user.application_id else None
+    }
+    
+    # Update last login
+    db_user.last_login_at = datetime.utcnow()
+    db.commit()
+    
+    token_data = {
+        "sub": user["username"],
+        "role": user["role"]
+    }
+    
+    # Include application_id for app admins
+    if user.get("application_id"):
+        token_data["application_id"] = user["application_id"]
+    
+    token = create_access_token(data=token_data)
+    
+    logger.info(f"Login successful for user: {request.username}")
     
     return {
         "access_token": token,
         "token_type": "bearer",
         "username": user["username"],
-        "role": user["role"]
+        "role": user["role"],
+        "application_id": user.get("application_id")
     }

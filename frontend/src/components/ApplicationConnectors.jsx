@@ -11,11 +11,11 @@
 import { useState, useEffect } from 'react';
 import {
     Card, Table, Button, Space, Tag, Empty, Badge, Modal,
-    Form, Input, Select, message, Typography, Tooltip, Spin
+    Form, Input, Select, message, Typography, Tooltip, Spin, Popconfirm
 } from 'antd';
 import {
     ApiOutlined, PlusOutlined, SyncOutlined,
-    CheckCircleOutlined, CloseCircleOutlined, ExclamationCircleOutlined
+    CheckCircleOutlined, CloseCircleOutlined, ExclamationCircleOutlined, DeleteOutlined
 } from '@ant-design/icons';
 import api from '../api/request';
 
@@ -95,6 +95,16 @@ function ApplicationConnectors({ applicationId, isCloud }) {
         }
     }
 
+    async function handleDeleteConnector(connectorId) {
+        try {
+            await api.delete(`/applications/${applicationId}/connectors/${connectorId}`);
+            message.success('Connector deleted successfully');
+            fetchData();
+        } catch (error) {
+            message.error('Failed to delete connector');
+        }
+    }
+
     const columns = [
         {
             title: 'Connector',
@@ -164,6 +174,18 @@ function ApplicationConnectors({ applicationId, isCloud }) {
                     >
                         Discover Tenants
                     </Button>
+                    <Popconfirm
+                        title="Delete this connector?"
+                        description="This will remove the connector configuration."
+                        onConfirm={() => handleDeleteConnector(record.id)}
+                        okText="Yes, Delete"
+                        okType="danger"
+                        cancelText="Cancel"
+                    >
+                        <Tooltip title="Delete Connector">
+                            <Button size="small" danger icon={<DeleteOutlined />} />
+                        </Tooltip>
+                    </Popconfirm>
                 </Space>
             ),
         },

@@ -109,16 +109,12 @@ function Login() {
                     </Form.Item>
                 </Form>
 
-                {/* Demo Credentials */}
-                <Card size="small" style={{ background: isDark ? '#141414' : '#f5f5f5' }}>
-                    <Paragraph style={{ margin: 0, fontSize: 13 }}>
-                        <Text strong>Demo Credentials:</Text>
-                        <br />
-                        <Text code>admin</Text> / <Text code>admin123</Text>
-                        <br />
-                        <Text code>user</Text> / <Text code>user123</Text>
-                    </Paragraph>
-                </Card>
+                {/* Info */}
+                <div style={{ textAlign: 'center', marginTop: 16 }}>
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                        Use your IGA credentials to sign in
+                    </Text>
+                </div>
             </Card>
         </div>
     );

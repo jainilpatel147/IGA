@@ -19,6 +19,8 @@ import ApplicationDetail from './pages/ApplicationDetail'
 import TenantDetail from './pages/TenantDetail'
 import GovernanceEvidence from './pages/GovernanceEvidence'
 import MyAccess from './pages/MyAccess'
+import Users from './pages/Users'
+
 
 /**
  * Protected Route Wrapper
@@ -77,6 +79,8 @@ function AppRoutes() {
                 <Route path="applications/:appId/tenants/:tenantId" element={<TenantDetail />} />
                 <Route path="evidence" element={<GovernanceEvidence />} />
                 <Route path="my-access" element={<MyAccess />} />
+                <Route path="users" element={<Users />} />
+
             </Route>
         </Routes>
     );

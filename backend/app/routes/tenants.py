@@ -308,6 +308,40 @@ def get_tenant_detail(
     )
 
 
+@router.delete("/{tenant_id}")
+def delete_tenant(
+    tenant_id: str,
+    db: Session = Depends(get_db),
+    user: dict = Depends(require_permission("manage:applications"))
+):
+    """Delete tenant and all associated data (Admin only)"""
+    try:
+        tenant_uuid = uuid.UUID(tenant_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid tenant ID")
+    
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_uuid).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    
+    tenant_name = tenant.name
+    
+    db.delete(tenant)
+    db.commit()
+    
+    AuditService.log_event(
+        db=db,
+        event_type="tenant",
+        action="delete",
+        actor=user.get("username", "admin"),
+        target=tenant_name,
+        decision="allow",
+        reason="Tenant deleted with all associated data"
+    )
+    
+    return {"message": "Tenant deleted successfully", "id": tenant_id}
+
+
 # ============================================
 # ROUTES: Identities CRUD
 # ============================================
@@ -697,6 +731,46 @@ def list_tenant_roles(
         )
         for r in roles
     ]
+
+
+@router.delete("/{tenant_id}/roles/{role_id}")
+def delete_role(
+    tenant_id: str,
+    role_id: str,
+    db: Session = Depends(get_db),
+    user: dict = Depends(require_permission("manage:identities"))
+):
+    """Delete a role (Admin only)"""
+    try:
+        tenant_uuid = uuid.UUID(tenant_id)
+        role_uuid = uuid.UUID(role_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid ID format")
+    
+    role = db.query(Role).filter(
+        Role.id == role_uuid,
+        Role.tenant_id == tenant_uuid
+    ).first()
+    
+    if not role:
+        raise HTTPException(status_code=404, detail="Role not found")
+    
+    role_name = role.name
+    
+    db.delete(role)
+    db.commit()
+    
+    AuditService.log_event(
+        db=db,
+        event_type="role",
+        action="delete",
+        actor=user.get("username", "admin"),
+        target=role_name,
+        decision="allow",
+        reason="Role deleted"
+    )
+    
+    return {"message": "Role deleted successfully", "id": role_id}
 
 
 # ============================================

@@ -90,19 +90,80 @@ def approve_request(
 ):
     """
     Approve an access request.
+    If it's an identity creation request, create the identity.
     
     - **request_id**: UUID of the request to approve
     - **reason**: Optional reason for approval
     """
+    from app.models.access_request import AccessRequest, RequestStatus
+    from app.models.identity import Identity
+    from app.services.audit import AuditService
+    import uuid
+    from datetime import datetime
+    
     try:
-        reason = action.reason if action else None
-        access_request = AccessRequestService.approve_request(
-            db=db,
-            request_id=request_id,
-            actor="admin",
-            reason=reason
-        )
-        return access_request
+        # Get the access request
+        access_request = db.query(AccessRequest).filter(
+            AccessRequest.id == uuid.UUID(request_id)
+        ).first()
+        
+        if not access_request:
+            raise HTTPException(status_code=404, detail="Access request not found")
+        
+        if access_request.status != RequestStatus.PENDING.value:
+            raise HTTPException(status_code=400, detail="Request is not pending")
+        
+        # Check if this is an identity creation request
+        if access_request.extra_data.get("request_type") == "identity_creation":
+            identity_data = access_request.extra_data.get("identity_data", {})
+            
+            # Create the identity
+            new_identity = Identity(
+                tenant_id=uuid.UUID(identity_data["tenant_id"]),
+                name=identity_data["name"],
+                email=identity_data.get("email"),
+                identity_type=identity_data.get("identity_type", "user"),
+                status="active"
+            )
+            
+            db.add(new_identity)
+            
+            # Update access request
+            access_request.status = RequestStatus.APPROVED.value
+            access_request.reviewed_by = uuid.UUID(identity_data["tenant_id"])  # Placeholder
+            access_request.review_notes = action.reason if action else "Approved"
+            access_request.reviewed_at = datetime.utcnow()
+            
+            db.commit()
+            db.refresh(new_identity)
+            
+            # Log audit event
+            AuditService.log_event(
+                db=db,
+                event_type="identity",
+                action="create",
+                actor="admin",
+                target=identity_data["name"],
+                decision="approved",
+                reason=f"Identity created after approval: {action.reason if action else 'N/A'}"
+            )
+            
+            return {
+                "id": str(access_request.id),
+                "status": access_request.status,
+                "identity_id": str(new_identity.id),
+                "message": "Identity created successfully"
+            }
+        else:
+            # Regular access request approval
+            reason = action.reason if action else None
+            access_request = AccessRequestService.approve_request(
+                db=db,
+                request_id=request_id,
+                actor="admin",
+                reason=reason
+            )
+            return access_request
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

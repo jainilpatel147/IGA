@@ -16,27 +16,64 @@ router = APIRouter(prefix="/identities", tags=["Identities"])
 
 @router.post(
     "",
-    response_model=IdentityResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Create Identity",
-    description="Create a new identity (user, service, or admin)"
+    summary="Request Identity Creation",
+    description="Create an access request for identity creation (requires approval)"
 )
 def create_identity(
     identity_data: IdentityCreate,
     db: Session = Depends(get_db)
 ):
     """
-    Create a new identity.
+    Create an access request for identity creation.
+    The identity will be created only after approval by app admin.
     
     - **name**: Display name for the identity
     - **type**: One of: user, service, admin
     """
-    identity = IdentityService.create_identity(
-        db=db,
-        identity_data=identity_data,
-        actor="api"  # In production, extract from JWT
+    from app.models.access_request import AccessRequest, RequestStatus
+    from app.services.audit import AuditService
+    import uuid
+    
+    # Create access request for identity creation
+    access_request = AccessRequest(
+        tenant_id=uuid.UUID(identity_data.tenant_id),
+        requester_identity_id=uuid.UUID(identity_data.tenant_id),  # System request
+        target_identity_id=uuid.UUID(identity_data.tenant_id),  # Placeholder
+        role_id=uuid.UUID(identity_data.tenant_id),  # Placeholder
+        justification=f"Identity creation request: {identity_data.name}",
+        status=RequestStatus.PENDING.value,
+        extra_data={
+            "request_type": "identity_creation",
+            "identity_data": {
+                "name": identity_data.name,
+                "email": identity_data.email,
+                "identity_type": identity_data.identity_type,
+                "tenant_id": identity_data.tenant_id
+            }
+        }
     )
-    return identity
+    
+    db.add(access_request)
+    db.commit()
+    db.refresh(access_request)
+    
+    # Log audit event
+    AuditService.log_event(
+        db=db,
+        event_type="access_request",
+        action="create",
+        actor="api",
+        target=identity_data.name,
+        decision="pending",
+        reason=f"Identity creation request submitted for approval"
+    )
+    
+    return {
+        "message": "Identity creation request submitted for approval",
+        "request_id": str(access_request.id),
+        "status": "pending"
+    }
 
 
 @router.get(

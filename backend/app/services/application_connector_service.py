@@ -10,12 +10,12 @@ from datetime import datetime
 
 from fastapi import HTTPException, status
 from app.schemas.application_connector_config import (
-    ApplicationConnectorConfig, 
-    ConnectorOperation, 
-    AuthType, 
+    ApplicationConnectorConfig,
+    AuthType,
     EndpointConfig,
     ResponseMapping
 )
+from app.connectors.operations import ConnectorOperation
 
 logger = logging.getLogger(__name__)
 
@@ -23,10 +23,16 @@ class ApplicationConnectorService:
     @staticmethod
     async def execute_operation(
         config_dict: Dict[str, Any], 
-        operation: ConnectorOperation
+        operation: ConnectorOperation,
+        payload: Optional[Dict[str, Any]] = None
     ) -> List[Dict[str, Any]]:
         """
         Execute a defined operation against an application connector
+        
+        Args:
+            config_dict: Connector configuration
+            operation: Operation to execute
+            payload: Data for CREATE/UPDATE/DELETE operations
         """
         try:
             # 1. Parse and Validate Configuration
@@ -65,10 +71,22 @@ class ApplicationConnectorService:
 
         # Apply custom headers if provided
         if config.connection.custom_headers:
-            headers.update(config.connection.custom_headers)
+            # Convert all header values to strings for httpx compatibility
+            headers.update({k: str(v) for k, v in config.connection.custom_headers.items()})
 
         # 4. Execute Request
         url = f"{config.connection.base_url}{endpoint.path}"
+        
+        # Build request body if needed
+        body = None
+        if payload and endpoint.body_template:
+            import json
+            body_str = endpoint.body_template
+            for key, value in payload.items():
+                body_str = body_str.replace(f"{{{{{key}}}}}", str(value))
+            body = json.loads(body_str)
+        elif payload:
+            body = payload
         
         async with httpx.AsyncClient(timeout=config.connection.timeout_seconds) as client:
             try:
@@ -77,10 +95,16 @@ class ApplicationConnectorService:
                     url=url,
                     headers=headers,
                     params=endpoint.query_params,
+                    json=body,
                     auth=auth
                 )
                 response.raise_for_status()
-                data = response.json()
+                
+                # Some operations may not return JSON (e.g., DELETE)
+                if response.text:
+                    data = response.json()
+                else:
+                    data = {"success": True}
             except httpx.HTTPStatusError as e:
                 raise HTTPException(
                     status_code=status.HTTP_502_BAD_GATEWAY,
@@ -121,19 +145,41 @@ class ApplicationConnectorService:
     def _normalize_response(raw_data: Any, mapping: ResponseMapping) -> List[Dict[str, Any]]:
         """Extract and map fields based on configuration"""
         
+        logger.info(f"Normalizing response with mapping: root_path={mapping.root_path}, id_field={mapping.id_field}, name_field={mapping.name_field}")
+        logger.info(f"Raw data type: {type(raw_data)}")
+        
         # 1. Extract ListRoot
         items = raw_data
         if mapping.root_path:
             # Support simple dot notation "data.items"
             parts = mapping.root_path.split('.')
+            logger.info(f"Extracting path: {parts}")
             for part in parts:
                 if isinstance(items, dict):
                     items = items.get(part, [])
+                    logger.info(f"After extracting '{part}': type={type(items)}, length={len(items) if isinstance(items, list) else 'N/A'}")
                 else:
                     break
         
+        # Handle dict with key-value pairs (e.g., {"0": "User", "1": "Admin"})
+        if isinstance(items, dict) and not isinstance(items, list):
+            logger.info(f"Converting dict with {len(items)} key-value pairs to list")
+            normalized = []
+            for key, value in items.items():
+                if value is None:
+                    continue
+                normalized.append({
+                    "id": str(key),
+                    "name": str(value),
+                    "description": None
+                })
+            logger.info(f"Normalized {len(normalized)} items from dict")
+            return normalized
+        
         if not isinstance(items, list):
             items = [items] if items else []
+        
+        logger.info(f"Final items to normalize: {len(items)} items")
             
         normalized = []
         for item in items:
@@ -151,5 +197,7 @@ class ApplicationConnectorService:
                 entry[target] = item.get(source)
                 
             normalized.append(entry)
+        
+        logger.info(f"Normalized {len(normalized)} items")
             
         return normalized

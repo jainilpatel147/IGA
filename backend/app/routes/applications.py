@@ -89,7 +89,14 @@ async def create_application(
     db: Session = Depends(get_db),
     user: dict = Depends(require_permission("manage:applications"))
 ):
-    """Create a new application (Admin only)"""
+    """Create a new application (Super Admin only)"""
+    # Only super_admin can create applications
+    if user.get("role") != "super_admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only super admin can create applications"
+        )
+    
     application = Application(
         name=request.name,
         description=request.description,
@@ -103,6 +110,28 @@ async def create_application(
     db.commit()
     db.refresh(application)
     
+    # Auto-create app admin user
+    from app.models.iga_user import IGAUser
+    import hashlib
+    
+    app_admin_username = f"{request.name.lower().replace(' ', '_')}_admin"
+    app_admin_password = f"{request.name.lower()}123"  # Demo password
+    
+    # Check if user already exists
+    existing_user = db.query(IGAUser).filter(IGAUser.username == app_admin_username).first()
+    if not existing_user:
+        app_admin = IGAUser(
+            username=app_admin_username,
+            password_hash=hashlib.sha256(app_admin_password.encode()).hexdigest(),  # Simple hash for demo
+            email=f"{app_admin_username}@iga.local",
+            full_name=f"{request.name} Administrator",
+            role="app_admin",
+            application_id=application.id,
+            is_active=True
+        )
+        db.add(app_admin)
+        db.commit()
+    
     AuditService.log_event(
         db=db,
         event_type="application",
@@ -110,7 +139,7 @@ async def create_application(
         actor=user.get("username", "admin"),
         target=request.name,
         decision="allow",
-        reason=f"Application registered ({request.integration_type})"
+        reason=f"Application registered ({request.integration_type}) with admin user: {app_admin_username}"
     )
     
     return ApplicationResponse(
@@ -131,8 +160,20 @@ async def list_applications(
     db: Session = Depends(get_db),
     user: dict = Depends(get_current_user_with_role)
 ):
-    """List all applications"""
-    apps = db.query(Application).order_by(Application.created_at.desc()).all()
+    """List applications based on user role"""
+    # Super admin sees all applications
+    if user.get("role") == "super_admin":
+        apps = db.query(Application).order_by(Application.created_at.desc()).all()
+    # App admin sees only their application
+    elif user.get("role") == "app_admin" and user.get("application_id"):
+        try:
+            app_uuid = uuid.UUID(user.get("application_id"))
+            apps = db.query(Application).filter(Application.id == app_uuid).all()
+        except (ValueError, TypeError):
+            apps = []
+    else:
+        apps = []
+    
     result = []
     for a in apps:
         tenant_count = db.query(Tenant).filter(Tenant.application_id == a.id).count()
@@ -184,7 +225,7 @@ async def update_application_status(
     db: Session = Depends(get_db),
     user: dict = Depends(require_permission("manage:applications"))
 ):
-    """Update application status (Admin only)"""
+    """Update application status"""
     try:
         app_uuid = uuid.UUID(app_id)
     except ValueError:
@@ -193,6 +234,14 @@ async def update_application_status(
     app = db.query(Application).filter(Application.id == app_uuid).first()
     if not app:
         raise HTTPException(status_code=404, detail="Application not found")
+    
+    # App admin can only manage their own application
+    if user.get("role") == "app_admin":
+        if str(app.id) != user.get("application_id"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You can only manage your own application"
+            )
     
     if status not in ["active", "inactive", "pending"]:
         raise HTTPException(status_code=400, detail="Invalid status")
@@ -212,6 +261,41 @@ async def update_application_status(
     )
     
     return {"message": "Status updated", "id": app_id, "status": status}
+
+
+@router.delete("/{app_id}")
+async def delete_application(
+    app_id: str,
+    db: Session = Depends(get_db),
+    user: dict = Depends(require_permission("manage:applications"))
+):
+    """Delete application and all associated data (Admin only)"""
+    try:
+        app_uuid = uuid.UUID(app_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid application ID")
+    
+    app = db.query(Application).filter(Application.id == app_uuid).first()
+    if not app:
+        raise HTTPException(status_code=404, detail="Application not found")
+    
+    app_name = app.name
+    
+    # Delete application (cascade will handle related data)
+    db.delete(app)
+    db.commit()
+    
+    AuditService.log_event(
+        db=db,
+        event_type="application",
+        action="delete",
+        actor=user.get("username", "admin"),
+        target=app_name,
+        decision="allow",
+        reason="Application deleted with all associated data"
+    )
+    
+    return {"message": "Application deleted successfully", "id": app_id}
 
 
 # Entitlement Routes

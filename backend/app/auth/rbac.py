@@ -10,6 +10,8 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from app.auth.jwt import decode_token, DEMO_USERS
 from app.models.user_role import ROLE_PERMISSIONS
+from sqlalchemy.orm import Session
+from app.database import get_db
 
 security = HTTPBearer(auto_error=False)
 
@@ -44,30 +46,33 @@ async def get_current_user_with_role(
 ) -> dict:
     """
     Get current user with role information.
-    Returns user dict with role and permissions.
+    Returns user dict with role, permissions, and application_id.
     """
-    # Demo mode: return admin if no token
     if not credentials:
-        user = DEMO_USERS["admin"].copy()
-        user["permissions"] = get_user_permissions(user["role"])
-        return user
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required"
+        )
     
     try:
         payload = decode_token(credentials.credentials)
         username = payload.get("sub")
-        role = payload.get("role", "user")
+        role = payload.get("role", "app_admin")
+        application_id = payload.get("application_id")
         
-        if username and username in DEMO_USERS:
-            user = DEMO_USERS[username].copy()
-            user["permissions"] = get_user_permissions(role)
-            return user
+        # Return user from token
+        user = {
+            "username": username,
+            "role": role,
+            "application_id": application_id,
+            "permissions": get_user_permissions(role)
+        }
+        return user
     except Exception:
-        pass
-    
-    # Fall back to admin for demo
-    user = DEMO_USERS["admin"].copy()
-    user["permissions"] = get_user_permissions(user["role"])
-    return user
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token"
+        )
 
 
 def require_permission(permission: str):

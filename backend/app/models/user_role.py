@@ -20,7 +20,19 @@ from app.database import Base
 
 # IGA Platform Permissions (simplified)
 ROLE_PERMISSIONS = {
-    "admin": [
+    "super_admin": [
+        "read:all", "write:all",
+        "manage:users", "manage:applications", "manage:entitlements",
+        "manage:api_keys", "manage:connectors",
+        "approve:requests", "view:audit", "view:evidence",
+        "manage:access_reviews", "view:compliance"
+    ],
+    "app_admin": [
+        "read:application", "write:application",
+        "manage:tenants", "manage:identities", "manage:entitlements",
+        "manage:connectors", "approve:requests", "view:audit"
+    ],
+    "admin": [  # Legacy support
         "read:all", "write:all",
         "manage:users", "manage:applications", "manage:entitlements",
         "manage:api_keys", "manage:connectors",

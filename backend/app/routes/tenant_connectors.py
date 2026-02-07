@@ -401,6 +401,7 @@ def get_tenant_connector(tenant_id: str, connector_id: str, db: Session = Depend
         template_name=tmpl.name,
         template_slug=tmpl.slug,
         provider=tmpl.provider,
+        category=tmpl.category,  # Add missing category field
         connector_type=tmpl.connector_type,
         status=tc.status,
         is_enabled=tc.is_enabled,
@@ -459,6 +460,7 @@ def update_tenant_connector(
         template_slug=tmpl.slug,
         provider=tmpl.provider,
         connector_type=tmpl.connector_type,
+        category=tmpl.category,
         status=tc.status,
         is_enabled=tc.is_enabled,
         last_sync_at=tc.last_sync_at,
@@ -869,3 +871,168 @@ async def sync_connector_resources(tenant_id: str, connector_id: str, db: Sessio
         "message": f"Successfully synced {roles_synced} roles and {entitlements_synced} entitlements",
         "stats": tc.sync_stats
     }
+
+
+# ==================== NEW CONNECTOR-DRIVEN OPERATIONS ====================
+
+class UserProvisionRequest(BaseModel):
+    """Request to provision a user via connector"""
+    username: str
+    email: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+
+
+class RoleAssignRequest(BaseModel):
+    """Request to assign role to user via connector"""
+    identity_id: str
+    role_id: str
+
+
+@router.get("/by-capability/{capability}")
+def get_connectors_by_capability(
+    tenant_id: str,
+    capability: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Get all tenant connectors that support a specific capability.
+    
+    This is used by the frontend to show only connectors that can perform a specific operation.
+    Example: GET /tenants/{id}/connectors/by-capability/delete_user
+    """
+    from app.services.tenant_connector_ops import TenantConnectorService
+    import uuid
+    
+    try:
+        tenant_uuid = uuid.UUID(tenant_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid tenant ID")
+    
+    connectors = TenantConnectorService.get_connectors_by_capability(
+        db=db,
+        tenant_id=str(tenant_uuid),
+        capability=capability
+    )
+    
+    return {
+        "capability": capability,
+        "connectors": connectors
+    }
+
+
+@router.post("/{connector_id}/sync-users")
+async def sync_users(
+    tenant_id: str,
+    connector_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Sync users from external system via this connector.
+    
+    Fetches all users from the connector and reconciles with IGA identities.
+    """
+    from app.services.tenant_connector_ops import TenantConnectorService
+    
+    result = await TenantConnectorService.sync_users(
+        db=db,
+        tenant_connector_id=connector_id,
+        actor="admin"  # TODO: Get from auth context
+    )
+    
+    return result
+
+
+@router.post("/{connector_id}/sync-roles")
+async def sync_roles(
+    tenant_id: str,
+    connector_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Sync roles from external system via this connector.
+    
+    Fetches all roles from the connector and reconciles with IGA roles.
+    """
+    from app.services.tenant_connector_ops import TenantConnectorService
+    
+    result = await TenantConnectorService.sync_roles(
+        db=db,
+        tenant_connector_id=connector_id,
+        actor="admin"  # TODO: Get from auth context
+    )
+    
+    return result
+
+
+@router.post("/{connector_id}/provision-user")
+async def provision_user(
+    tenant_id: str,
+    connector_id: str,
+    request: UserProvisionRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Provision a new user in external system via this connector.
+    
+    Creates the user in the external system and stores the identity in IGA.
+    """
+    from app.services.tenant_connector_ops import TenantConnectorService
+    
+    result = await TenantConnectorService.provision_user(
+        db=db,
+        tenant_connector_id=connector_id,
+        user_data=request.dict(),
+        actor="admin"  # TODO: Get from auth context
+    )
+    
+    return result
+
+
+@router.delete("/{connector_id}/delete-user/{identity_id}")
+async def delete_user_via_connector(
+    tenant_id: str,
+    connector_id: str,
+    identity_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Delete a user in external system via this connector.
+    
+    This is the connector-driven delete operation selected by the user.
+    """
+    from app.services.tenant_connector_ops import TenantConnectorService
+    
+    result = await TenantConnectorService.delete_user(
+        db=db,
+        tenant_connector_id=connector_id,
+        identity_id=identity_id,
+        actor="admin"  # TODO: Get from auth context
+    )
+    
+    return result
+
+
+@router.post("/{connector_id}/assign-role")
+async def assign_role_via_connector(
+    tenant_id: str,
+    connector_id: str,
+    request: RoleAssignRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Assign role to user in external system via this connector.
+    
+    This is the connector-driven role assignment selected by the user.
+    """
+    from app.services.tenant_connector_ops import TenantConnectorService
+    
+    result = await TenantConnectorService.assign_role(
+        db=db,
+        tenant_connector_id=connector_id,
+        identity_id=request.identity_id,
+        role_id=request.role_id,
+        actor="admin"  # TODO: Get from auth context
+    )
+    
+    return result

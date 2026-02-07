@@ -47,7 +47,7 @@ class ConnectionConfig(BaseModel):
     base_url: str = Field(..., description="Base URL for the application API")
     auth_type: AuthType = Field(default=AuthType.NONE)
     auth_config: AuthConfig = Field(default_factory=AuthConfig)
-    custom_headers: Dict[str, str] = Field(default_factory=dict, description="Optional custom HTTP headers")
+    custom_headers: Dict[str, Any] = Field(default_factory=dict, description="Optional custom HTTP headers")
     timeout_seconds: int = Field(default=30, ge=1, le=300)
     retry_count: int = Field(default=3, ge=0, le=5)
 
@@ -63,6 +63,7 @@ class EndpointConfig(BaseModel):
     path: str = Field(..., description="API path relative to base_url")
     headers: Dict[str, str] = Field(default_factory=dict)
     query_params: Dict[str, str] = Field(default_factory=dict)
+    body_template: Optional[str] = Field(None, description="JSON body template with {{placeholders}}")
     enabled: bool = True
     
     @validator('path')
