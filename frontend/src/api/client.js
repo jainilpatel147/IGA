@@ -22,9 +22,13 @@ export async function createIdentity(data) {
 // Access Request API
 // ============================================
 
-export async function getAccessRequests(status = null) {
-  const params = status ? `?status=${status}` : '';
-  return api.get(`/access/requests${params}`);
+export async function getAccessRequests(status = null, tenantId = null) {
+  const queryParams = new URLSearchParams();
+  if (status) queryParams.append('status', status);
+  if (tenantId) queryParams.append('tenant_id', tenantId);
+  
+  const queryString = queryParams.toString() ? `?${queryParams.toString()}` : '';
+  return api.get(`/access/requests${queryString}`);
 }
 
 export async function createAccessRequest(data) {

@@ -13,6 +13,7 @@ from app.seeders.seed_app_connectors import AppConnectorSeeder
 from app.seeders.seed_discovery_connectors import DiscoveryConnectorSeeder
 from app.seeders.seed_demo_data import DemoDataSeeder
 from app.seeders.update_keycloak_capabilities import UpdateKeycloakCapabilitiesSeeder
+from app.seeders.update_generic_rest_capabilities import UpdateGenericRestCapabilitiesSeeder
 
 # Registry of all seeders in execution order
 SEEDERS: List[Type[BaseSeeder]] = [
@@ -21,6 +22,7 @@ SEEDERS: List[Type[BaseSeeder]] = [
     AppConnectorSeeder,          # Core application connector templates (always needed)
     DiscoveryConnectorSeeder,    # Discovery-capable connector templates
     UpdateKeycloakCapabilitiesSeeder, # Update Keycloak capabilities
+    UpdateGenericRestCapabilitiesSeeder, # Update Generic REST capabilities
     DemoDataSeeder,              # Demo/sample data (optional, controlled by env)
 ]
 

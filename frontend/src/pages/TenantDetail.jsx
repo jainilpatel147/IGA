@@ -26,6 +26,7 @@ import {
 import api from '../api/request'
 import { useAuth } from '../context/AuthContext'
 import ConnectorSelectionModal from '../components/ConnectorSelectionModal'
+import AccessRequests from './AccessRequests'
 
 const { Title, Text } = Typography;
 const { Option } = Select;
@@ -766,6 +767,16 @@ function TenantDetail() {
             ) : (
                 <Empty description="No entitlements defined for this application" />
             ),
+        },
+        {
+            key: 'access_requests',
+            label: (
+                <Space>
+                    <AuditOutlined />
+                    <span>Access Requests</span>
+                </Space>
+            ),
+            children: <AccessRequests tenantId={tenantId} identities={identities} />,
         },
         {
             key: 'connectors',

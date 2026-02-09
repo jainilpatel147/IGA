@@ -38,9 +38,8 @@ def create_identity(
     # Create access request for identity creation
     access_request = AccessRequest(
         tenant_id=uuid.UUID(identity_data.tenant_id),
-        requester_identity_id=uuid.UUID(identity_data.tenant_id),  # System request
-        target_identity_id=uuid.UUID(identity_data.tenant_id),  # Placeholder
-        role_id=uuid.UUID(identity_data.tenant_id),  # Placeholder
+        # requester/target/role IDs are now nullable for identity creation requests
+        request_type="IDENTITY_CREATION",
         justification=f"Identity creation request: {identity_data.name}",
         status=RequestStatus.PENDING.value,
         extra_data={

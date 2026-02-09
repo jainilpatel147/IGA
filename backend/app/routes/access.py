@@ -14,6 +14,8 @@ from app.schemas.access_request import (
     AccessRequestAction
 )
 from app.services.access_request import AccessRequestService
+from app.auth.rbac import get_current_user_with_role
+from app.services.tenant_connector_ops import TenantConnectorService
 
 router = APIRouter(prefix="/access", tags=["Access Requests"])
 
@@ -60,6 +62,7 @@ def list_requests(
     limit: int = 100,
     offset: int = 0,
     status: Optional[str] = None,
+    tenant_id: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
     """
@@ -68,12 +71,17 @@ def list_requests(
     - **limit**: Maximum number to return
     - **offset**: Pagination offset
     - **status**: Filter by status (pending, approved, rejected)
+    - **tenant_id**: Filter by tenant ID
     """
+    import uuid
+    tenant_uuid = uuid.UUID(tenant_id) if tenant_id else None
+    
     return AccessRequestService.list_requests(
         db=db,
         limit=limit,
         offset=offset,
-        status=status
+        status=status,
+        tenant_id=tenant_uuid
     )
 
 
@@ -83,10 +91,11 @@ def list_requests(
     summary="Approve Access Request",
     description="Approve a pending access request"
 )
-def approve_request(
+async def approve_request(
     request_id: str,
     action: AccessRequestAction = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user_with_role)
 ):
     """
     Approve an access request.
@@ -130,7 +139,7 @@ def approve_request(
             
             # Update access request
             access_request.status = RequestStatus.APPROVED.value
-            access_request.reviewed_by = uuid.UUID(identity_data["tenant_id"])  # Placeholder
+            access_request.reviewed_by = uuid.UUID(user.get("id")) if user.get("id") else None
             access_request.review_notes = action.reason if action else "Approved"
             access_request.reviewed_at = datetime.utcnow()
             
@@ -142,17 +151,50 @@ def approve_request(
                 db=db,
                 event_type="identity",
                 action="create",
-                actor="admin",
+                actor=user.get("username", "admin"),
                 target=identity_data["name"],
                 decision="approved",
                 reason=f"Identity created after approval: {action.reason if action else 'N/A'}"
             )
             
+            # Trigger downstream provisioning to SSO (if any)
+            try:
+                # Find active SSO connectors for this tenant
+                sso_connectors = TenantConnectorService.get_connectors_by_capability(
+                    db=db,
+                    tenant_id=str(new_identity.tenant_id),
+                    capability="create_user"
+                )
+                
+                provisioning_results = []
+                for connector in sso_connectors:
+                    if connector.get("category") == "SSO":
+                        try:
+                            result = await TenantConnectorService.provision_user(
+                                db=db,
+                                tenant_connector_id=connector["id"],
+                                user_data={
+                                    "username": new_identity.name,
+                                    "email": new_identity.email,
+                                    "first_name": new_identity.name.split(" ")[0],
+                                    "last_name": " ".join(new_identity.name.split(" ")[1:]) if " " in new_identity.name else ""
+                                },
+                                actor=user.get("username", "system")
+                            )
+                            provisioning_results.append({"connector": connector["name"], "status": "success"})
+                        except Exception as e:
+                            provisioning_results.append({"connector": connector["name"], "status": "failed", "error": str(e)})
+            except Exception as e:
+                # Log error but don't fail the approval
+                print(f"Error during downstream provisioning: {e}")
+                provisioning_results = [{"error": str(e)}]
+
             return {
                 "id": str(access_request.id),
                 "status": access_request.status,
                 "identity_id": str(new_identity.id),
-                "message": "Identity created successfully"
+                "message": "Identity created successfully",
+                "provisioning": provisioning_results
             }
         else:
             # Regular access request approval

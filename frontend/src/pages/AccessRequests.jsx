@@ -22,29 +22,34 @@ const { Title, Text } = Typography;
 /**
  * Access Requests Page with Ant Design
  */
-function AccessRequests() {
+function AccessRequests({ tenantId, identities: propIdentities }) {
     const [requests, setRequests] = useState([]);
     const [identities, setIdentities] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [modalOpen, setModalOpen] = useState(false);
-    const [submitting, setSubmitting] = useState(false);
-    const [filter, setFilter] = useState('all');
-    const [selectedRowKeys, setSelectedRowKeys] = useState([]);
-    const [form] = Form.useForm();
-
+    // ...
     useEffect(() => {
         fetchData();
-    }, []);
+    }, [tenantId, propIdentities]);
 
     async function fetchData() {
         try {
             setLoading(true);
+            const requestsPromise = getAccessRequests(null, tenantId);
+            // If propIdentities is provided and has items, use it. Otherwise fetch.
+            // But if propIdentities is [], it might just be not loaded yet.
+            // We should rely on parent to pass updated list.
+            const identitiesPromise = (propIdentities && propIdentities.length > 0)
+                ? Promise.resolve(propIdentities)
+                : getIdentities();
+
             const [requestsData, identitiesData] = await Promise.all([
-                getAccessRequests(),
-                getIdentities()
+                requestsPromise,
+                identitiesPromise
             ]);
             setRequests(requestsData);
-            setIdentities(identitiesData);
+            if (identitiesData) {
+                setIdentities(identitiesData);
+            }
         } catch (error) {
             console.error('Failed to load data:', error);
         } finally {

@@ -45,10 +45,10 @@ class ApplicationConnectorService:
 
         # 2. Resolve Endpoint
         endpoint = config.get_endpoint(operation)
-        if not endpoint:
-            # If endpoint is not configured/enabled, we return empty list 
+        if not endpoint or not endpoint.path:
+            # If endpoint is not configured/enabled/missing path, we return empty list 
             # (or raise error depending on strictness, returning empty is safer for sync)
-            logger.warning(f"Operation {operation} not configured or enabled")
+            logger.warning(f"Operation {operation} not configured, enabled, or missing path")
             return []
 
         # 3. Build Client & Auth
@@ -156,9 +156,22 @@ class ApplicationConnectorService:
             logger.info(f"Extracting path: {parts}")
             for part in parts:
                 if isinstance(items, dict):
+                    logger.info(f"extracting '{part}' from dict. Available keys: {list(items.keys())}")
+                    if part not in items:
+                         logger.warning(f"Key '{part}' NOT FOUND in data!")
                     items = items.get(part, [])
                     logger.info(f"After extracting '{part}': type={type(items)}, length={len(items) if isinstance(items, list) else 'N/A'}")
-                else:
+                    logger.warning(f"Cannot extract '{part}' - current item is not a dict (type={type(items)})")
+                    break
+
+        # 2. Heuristic: Handle "Dict as List Wrapper" (e.g., {"data": [...]})
+        # If no root_path was specified, but we got a dict, check for common wrapper keys
+        if isinstance(items, dict) and not mapping.root_path:
+            common_wrappers = ["data", "items", "results", "values", "content", "list"]
+            for wrapper in common_wrappers:
+                if wrapper in items and isinstance(items[wrapper], list):
+                    logger.info(f"Auto-detected list wrapper '{wrapper}'")
+                    items = items[wrapper]
                     break
         
         # Handle dict with key-value pairs (e.g., {"0": "User", "1": "Admin"})
@@ -201,3 +214,167 @@ class ApplicationConnectorService:
         logger.info(f"Normalized {len(normalized)} items")
             
         return normalized
+    
+    @staticmethod
+    def build_config_from_template(
+        template: Any,  # ConnectorTemplate
+        connector_config: Dict[str, Any], 
+        operation: str
+    ) -> Dict[str, Any]:
+        """
+        Build nested ApplicationConnectorConfig from template defaults + connector credentials.
+        
+        Handles two formats:
+        1. Already nested format: {"connection": {...}, "endpoints": [...]}
+        2. Flat format: {"base_url": "...", "auth_type": "...", ...}
+        
+        Args:
+            template: ConnectorTemplate model
+            connector_config: Raw config dictionary from TenantConnector
+            operation: Operation to configure endpoint for (e.g. "FETCH_ROLES")
+        """
+        # Check if config is already in nested format
+        if "connection" in connector_config and "endpoints" in connector_config:
+            # Already nested - use it directly but fix any endpoints missing required fields
+            import copy
+            nested = copy.deepcopy(connector_config)
+            
+            fallback_paths = {
+                "TEST_CONNECTION": "/api/health",
+                "FETCH_ROLES": "/api/roles", 
+                "FETCH_ENTITLEMENTS": "/api/entitlements",
+                "FETCH_IDENTITIES": "/api/users",
+                "FETCH_TENANTS": "/api/tenants"
+            }
+            
+            # Ensure all endpoints have required 'path' field
+            for ep in nested.get("endpoints", []):
+                if not ep.get("path"):
+                    op = ep.get("operation", "")
+                    ep["path"] = fallback_paths.get(op, "/api")
+            
+            # Check if the operation endpoint exists, if not add it
+            existing_ops = [ep.get("operation") for ep in nested.get("endpoints", [])]
+            if operation not in existing_ops:
+                # For TEST_CONNECTION, use an existing enabled endpoint's path
+                test_path = fallback_paths.get(operation, "/api")
+                if operation == "TEST_CONNECTION":
+                    # Find first enabled endpoint with a valid path to use for testing
+                    for ep in nested.get("endpoints", []):
+                        if ep.get("enabled") and ep.get("path"):
+                            test_path = ep.get("path")
+                            break
+                
+                nested["endpoints"].append({
+                    "operation": operation,
+                    "method": "GET",
+                    "path": test_path,
+                    "enabled": True
+                })
+            
+            return nested
+        
+        # Flat format - need to build nested structure
+        template_schema = template.config_schema or {}
+        template_defaults = template_schema.get("defaults", {})
+        oauth_config = template_schema.get("oauth", {})
+        
+        # Merge: connector config takes precedence over template defaults
+        flat_config = {**template_defaults, **connector_config}
+        
+        # Determine base_url from various sources
+        base_url = (
+            flat_config.get("base_url") or 
+            oauth_config.get("base_url") or 
+            template_defaults.get("base_url")
+        )
+        
+        # base_url is required for REST API connectors
+        if not base_url:
+            raise HTTPException(
+                status_code=400, 
+                detail="Missing required field 'base_url' in connector configuration. Please provide the API base URL."
+            )
+        
+        # Build auth_config based on auth_type
+        auth_config = {}
+        auth_type = flat_config.get("auth_type", template.connector_type.upper() if template.connector_type else "NONE")
+        
+        if auth_type in ("Bearer Token", "API_KEY", "bearer", "token"):
+            auth_type = "API_KEY"
+            auth_config = {
+                "header_name": flat_config.get("header_name", "Authorization"),
+                "header_value": f"Bearer {flat_config.get('auth_token', flat_config.get('access_token', ''))}"
+            }
+        elif auth_type in ("BASIC", "basic"):
+            auth_type = "BASIC"
+            auth_config = {
+                "username": flat_config.get("username", ""),
+                "password": flat_config.get("password", "")
+            }
+        elif auth_type in ("OAUTH2", "oauth2", "oauth"):
+            auth_type = "OAUTH2"
+            auth_config = {
+                "client_id": flat_config.get("client_id", ""),
+                "client_secret": flat_config.get("client_secret", ""),
+                "token_url": flat_config.get("token_url", oauth_config.get("token_url", ""))
+            }
+        else:
+            auth_type = "NONE"
+        
+        # Build endpoints based on operation
+        endpoints = []
+        
+        # Map operations to config keys
+        op_path_map = {
+            "TEST_CONNECTION": ["test_endpoint", "health_endpoint"],
+            "FETCH_IDENTITIES": ["identities_endpoint", "users_endpoint"],
+            "FETCH_ROLES": ["roles_endpoint"],
+            "FETCH_ENTITLEMENTS": ["entitlements_endpoint"]
+        }
+        
+        default_paths = {
+            "TEST_CONNECTION": "/api/health",
+            "FETCH_IDENTITIES": "/api/users",
+            "FETCH_ROLES": "/api/roles",
+            "FETCH_ENTITLEMENTS": "/api/entitlements"
+        }
+        
+        # Determine path
+        path = default_paths.get(operation, "/api")
+        if operation in op_path_map:
+            for key in op_path_map[operation]:
+                if flat_config.get(key):
+                    path = flat_config.get(key)
+                    break
+        
+        endpoints.append({
+            "operation": operation,
+            "method": "GET",
+            "path": path,
+            "enabled": True
+        })
+        
+        # Configure response mapping if root_path or fields are provided
+        response_mapping = {}
+        if operation == "FETCH_ROLES" and flat_config.get("roles_root_path"):
+            response_mapping = {
+                "FETCH_ROLES": {
+                    "root_path": flat_config.get("roles_root_path"),
+                    "id_field": flat_config.get("roles_id_field", "id"),
+                    "name_field": flat_config.get("roles_name_field", "name"), 
+                    "description_field": flat_config.get("roles_description_field", "description")
+                }
+            }
+        
+        return {
+            "connection": {
+                "base_url": base_url,
+                "auth_type": auth_type,
+                "auth_config": auth_config,
+                "custom_headers": flat_config.get("custom_headers", {}),
+                "timeout_seconds": flat_config.get("timeout_seconds", 30)
+            },
+            "endpoints": endpoints,
+            "response_mapping": response_mapping
+        }

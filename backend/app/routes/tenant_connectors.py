@@ -19,146 +19,6 @@ from app.services.audit import AuditService
 router = APIRouter(prefix="/tenants/{tenant_id}/connectors", tags=["Tenant Connectors"])
 
 
-def build_nested_config(template: ConnectorTemplate, connector_config: Dict[str, Any], operation: str) -> Dict[str, Any]:
-    """
-    Build nested ApplicationConnectorConfig from template defaults + connector credentials.
-    
-    Handles two formats:
-    1. Already nested format: {"connection": {...}, "endpoints": [...]}
-    2. Flat format: {"base_url": "...", "auth_type": "...", ...}
-    """
-    # Check if config is already in nested format
-    if "connection" in connector_config and "endpoints" in connector_config:
-        # Already nested - use it directly but fix any endpoints missing required fields
-        import copy
-        nested = copy.deepcopy(connector_config)
-        
-        fallback_paths = {
-            "TEST_CONNECTION": "/api/health",
-            "FETCH_ROLES": "/api/roles", 
-            "FETCH_ENTITLEMENTS": "/api/entitlements",
-            "FETCH_IDENTITIES": "/api/users",
-            "FETCH_TENANTS": "/api/tenants"
-        }
-        
-        # Ensure all endpoints have required 'path' field
-        for ep in nested.get("endpoints", []):
-            if not ep.get("path"):
-                op = ep.get("operation", "")
-                ep["path"] = fallback_paths.get(op, "/api")
-        
-        # Check if the operation endpoint exists, if not add it
-        existing_ops = [ep.get("operation") for ep in nested.get("endpoints", [])]
-        if operation not in existing_ops:
-            # For TEST_CONNECTION, use an existing enabled endpoint's path
-            test_path = fallback_paths.get(operation, "/api")
-            if operation == "TEST_CONNECTION":
-                # Find first enabled endpoint with a valid path to use for testing
-                for ep in nested.get("endpoints", []):
-                    if ep.get("enabled") and ep.get("path"):
-                        test_path = ep.get("path")
-                        break
-            
-            nested["endpoints"].append({
-                "operation": operation,
-                "method": "GET",
-                "path": test_path,
-                "enabled": True
-            })
-        
-        return nested
-    
-    # Flat format - need to build nested structure
-    template_schema = template.config_schema or {}
-    template_defaults = template_schema.get("defaults", {})
-    oauth_config = template_schema.get("oauth", {})
-    
-    # Merge: connector config takes precedence over template defaults
-    flat_config = {**template_defaults, **connector_config}
-    
-    # Determine base_url from various sources
-    base_url = (
-        flat_config.get("base_url") or 
-        oauth_config.get("base_url") or 
-        template_defaults.get("base_url")
-    )
-    
-    # base_url is required for REST API connectors
-    if not base_url:
-        raise HTTPException(
-            status_code=400, 
-            detail="Missing required field 'base_url' in connector configuration. Please provide the API base URL."
-        )
-    
-    # Build auth_config based on auth_type
-    auth_config = {}
-    auth_type = flat_config.get("auth_type", template.connector_type.upper() if template.connector_type else "NONE")
-    
-    if auth_type in ("Bearer Token", "API_KEY", "bearer", "token"):
-        auth_type = "API_KEY"
-        auth_config = {
-            "header_name": flat_config.get("header_name", "Authorization"),
-            "header_value": f"Bearer {flat_config.get('auth_token', flat_config.get('access_token', ''))}"
-        }
-    elif auth_type in ("BASIC", "basic"):
-        auth_type = "BASIC"
-        auth_config = {
-            "username": flat_config.get("username", ""),
-            "password": flat_config.get("password", "")
-        }
-    elif auth_type in ("OAUTH2", "oauth2", "oauth"):
-        auth_type = "OAUTH2"
-        auth_config = {
-            "client_id": flat_config.get("client_id", ""),
-            "client_secret": flat_config.get("client_secret", ""),
-            "token_url": flat_config.get("token_url", oauth_config.get("token_url", ""))
-        }
-    else:
-        auth_type = "NONE"
-    
-    # Build endpoints based on operation
-    endpoints = []
-    if operation == "TEST_CONNECTION":
-        endpoints.append({
-            "operation": "TEST_CONNECTION",
-            "method": "GET",
-            "path": flat_config.get("test_endpoint", flat_config.get("health_endpoint", "/api/health")),
-            "enabled": True
-        })
-    elif operation == "FETCH_IDENTITIES":
-        endpoints.append({
-            "operation": "FETCH_IDENTITIES",
-            "method": "GET",
-            "path": flat_config.get("identities_endpoint", flat_config.get("users_endpoint", "/api/users")),
-            "enabled": True
-        })
-    elif operation == "FETCH_ROLES":
-        endpoints.append({
-            "operation": "FETCH_ROLES",
-            "method": "GET",
-            "path": flat_config.get("roles_endpoint", "/api/roles"),
-            "enabled": True
-        })
-    elif operation == "FETCH_ENTITLEMENTS":
-        endpoints.append({
-            "operation": "FETCH_ENTITLEMENTS",
-            "method": "GET",
-            "path": flat_config.get("entitlements_endpoint", "/api/entitlements"),
-            "enabled": True
-        })
-    
-    return {
-        "connection": {
-            "base_url": base_url,
-            "auth_type": auth_type,
-            "auth_config": auth_config,
-            "custom_headers": flat_config.get("custom_headers", {}),
-            "timeout_seconds": flat_config.get("timeout_seconds", 30)
-        },
-        "endpoints": endpoints,
-        "response_mapping": {}
-    }
-
 
 # Schemas
 class TenantConnectorCreate(BaseModel):
@@ -518,7 +378,7 @@ async def test_tenant_connector(tenant_id: str, connector_id: str, db: Session =
     
     try:
         # Build nested config from template + connector credentials
-        nested_config = build_nested_config(tmpl, tc.config or {}, "TEST_CONNECTION")
+        nested_config = ApplicationConnectorService.build_config_from_template(tmpl, tc.config or {}, "TEST_CONNECTION")
         logger.info(f"Built nested config with base_url: {nested_config['connection']['base_url']}")
         logger.info(f"Full nested config: {nested_config}")
         
@@ -637,7 +497,7 @@ async def sync_connector_identities(tenant_id: str, connector_id: str, db: Sessi
     
     try:
         # Build nested config from template + connector credentials
-        nested_config = build_nested_config(tmpl, tc.config or {}, "FETCH_IDENTITIES")
+        nested_config = ApplicationConnectorService.build_config_from_template(tmpl, tc.config or {}, "FETCH_IDENTITIES")
         logger.info(f"Built nested config with base_url: {nested_config['connection']['base_url']}")
         
         # Execute FETCH_IDENTITIES via ApplicationConnectorService
@@ -753,8 +613,8 @@ async def sync_connector_resources(tenant_id: str, connector_id: str, db: Sessio
     try:
         if tmpl.category == "APPLICATION":
             # Build nested config from template + connector credentials
-            roles_config = build_nested_config(tmpl, tc.config or {}, "FETCH_ROLES")
-            # entitlements_config = build_nested_config(tmpl, tc.config or {}, "FETCH_ENTITLEMENTS")
+            roles_config = ApplicationConnectorService.build_config_from_template(tmpl, tc.config or {}, "FETCH_ROLES")
+            # entitlements_config = ApplicationConnectorService.build_config_from_template(tmpl, tc.config or {}, "FETCH_ENTITLEMENTS")
             logger.info(f"Built nested config with base_url: {roles_config['connection']['base_url']}")
             
             # Execute FETCH_ROLES

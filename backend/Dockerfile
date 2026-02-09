@@ -32,8 +32,8 @@ RUN pip install -r requirements.txt
 # Copy application code
 COPY . .
 
-# Make entrypoint executable
-RUN chmod +x entrypoint.sh
+# Make entrypoint executable and fix line endings
+RUN chmod +x entrypoint.sh && sed -i 's/\r$//' entrypoint.sh
 
 # Expose port
 EXPOSE 8000

@@ -339,8 +339,10 @@ class TenantDiscoveryService:
                 ],
                 "response_mapping": {
                     "FETCH_TENANTS": {
+                        "root_path": flat_config.get("tenant_root_path", flat_config.get("root_path", flat_config.get("tenant_response_path", flat_config.get("response_path")))),
                         "id_field": flat_config.get("tenant_id_field", "id"),
-                        "name_field": flat_config.get("tenant_name_field", "name")
+                        "name_field": flat_config.get("tenant_name_field", "name"),
+                        "description_field": flat_config.get("tenant_description_field", "description")
                     }
                 }
             }

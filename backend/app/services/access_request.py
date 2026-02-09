@@ -184,7 +184,8 @@ class AccessRequestService:
         db: Session,
         limit: int = 100,
         offset: int = 0,
-        status: Optional[str] = None
+        status: Optional[str] = None,
+        tenant_id: Optional[UUID] = None
     ) -> list[AccessRequest]:
         """
         List access requests with optional filtering.
@@ -194,6 +195,7 @@ class AccessRequestService:
             limit: Max requests to return
             offset: Pagination offset
             status: Optional filter by status
+            tenant_id: Optional filter by tenant
             
         Returns:
             List of AccessRequests
@@ -202,6 +204,9 @@ class AccessRequestService:
         
         if status:
             query = query.filter(AccessRequest.status == status)
+            
+        if tenant_id:
+            query = query.filter(AccessRequest.tenant_id == tenant_id)
         
         return (
             query

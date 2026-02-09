@@ -8,8 +8,9 @@ from typing import List, Dict, Any
 from fastapi import HTTPException, status
 
 from app.connectors.factory import ConnectorFactory
-from app.models import TenantConnector, Identity, Role
+from app.models import TenantConnector, Identity, Role, AccessRequest
 from app.services.audit import AuditService
+from app.services.application_connector_service import ApplicationConnectorService
 
 logger = logging.getLogger(__name__)
 
@@ -56,9 +57,17 @@ class TenantConnectorService:
         logger.info(f"Starting user sync for connector {tc.id} (template: {tc.template.slug})")
         
         # 3. Resolve connector implementation via factory
+        # Use ApplicationConnectorService to build config for generic connectors
+        connector_config = tc.config
+        if not ConnectorFactory.is_specific_implementation(tc.template.slug):
+            logger.info("Building nested config for generic connector")
+            connector_config = ApplicationConnectorService.build_config_from_template(
+                tc.template, tc.config, "FETCH_IDENTITIES"
+            )
+            
         connector = ConnectorFactory.create_connector(
             template_slug=tc.template.slug,
-            config=tc.config
+            config=connector_config
         )
         
         # 4. Execute fetch_users
@@ -80,6 +89,7 @@ class TenantConnectorService:
         # 5. Reconcile with IGA database
         created = 0
         updated = 0
+        requests_created = 0
         
         for user in users:
             existing = db.query(Identity).filter(
@@ -88,25 +98,43 @@ class TenantConnectorService:
             ).first()
             
             if existing:
-                # Update existing
+                # Update existing identity
                 existing.name = user.display_name or user.username
                 existing.email = user.email
                 existing.status = "active" if user.is_active else "inactive"
                 existing.attributes = user.attributes
                 updated += 1
             else:
-                # Create new
-                new_identity = Identity(
-                    tenant_id=tc.tenant_id,
-                    name=user.display_name or user.username,
-                    email=user.email,
-                    external_id=user.id,
-                    identity_type="user",
-                    status="active" if user.is_active else "inactive",
-                    attributes=user.attributes
-                )
-                db.add(new_identity)
-                created += 1
+                # Check for pending access request
+                pending_request = db.query(AccessRequest).filter(
+                    AccessRequest.tenant_id == tc.tenant_id,
+                    AccessRequest.extra_data['external_id'].astext == user.id,
+                    AccessRequest.request_type == 'IDENTITY_CREATION',
+                    AccessRequest.status == 'pending'
+                ).first()
+                
+                if not pending_request:
+                    # Create new Access Request for identity creation
+                    new_request = AccessRequest(
+                        tenant_id=tc.tenant_id,
+                        request_type='IDENTITY_CREATION',
+                        status='pending',
+                        justification=f'Synced from {tc.template.name}',
+                        extra_data={
+                            'request_type': 'identity_creation',
+                            'external_id': user.id,
+                            'identity_data': {
+                                'name': user.display_name or user.username,
+                                'email': user.email,
+                                'external_id': user.id,
+                                'attributes': user.attributes,
+                                'tenant_id': str(tc.tenant_id),
+                                'identity_type': 'user'
+                            }
+                        }
+                    )
+                    db.add(new_request)
+                    requests_created += 1
         
         db.commit()
         
@@ -118,16 +146,17 @@ class TenantConnectorService:
             target=f"connector:{tc.template.slug}",
             action="sync_users",
             decision="allow",
-            reason=f"Synced {len(users)} users: {created} created, {updated} updated"
+            reason=f"Synced {len(users)} users: {updated} updated, {requests_created} requests created"
         )
         
-        logger.info(f"User sync completed: {created} created, {updated} updated")
+        logger.info(f"User sync completed: {updated} updated, {requests_created} identity requests created")
         
         return {
             "success": True,
             "total_fetched": len(users),
-            "created": created,
-            "updated": updated
+            "created": 0, # No longer creating directly
+            "updated": updated,
+            "requests_created": requests_created
         }
     
     @staticmethod
@@ -170,9 +199,17 @@ class TenantConnectorService:
         logger.info(f"Starting role sync for connector {tc.id} (template: {tc.template.slug})")
         
         # 3. Resolve connector implementation via factory
+        # Use ApplicationConnectorService to build config for generic connectors
+        connector_config = tc.config
+        if not ConnectorFactory.is_specific_implementation(tc.template.slug):
+            logger.info("Building nested config for generic connector")
+            connector_config = ApplicationConnectorService.build_config_from_template(
+                tc.template, tc.config, "FETCH_ROLES"
+            )
+            
         connector = ConnectorFactory.create_connector(
             template_slug=tc.template.slug,
-            config=tc.config
+            config=connector_config
         )
         
         # 4. Execute fetch_roles
@@ -282,9 +319,17 @@ class TenantConnectorService:
         logger.info(f"Provisioning user via connector {tc.id}")
         
         # Resolve connector
+        # Use ApplicationConnectorService to build config for generic connectors
+        connector_config = tc.config
+        if not ConnectorFactory.is_specific_implementation(tc.template.slug):
+            logger.info("Building nested config for generic connector")
+            connector_config = ApplicationConnectorService.build_config_from_template(
+                tc.template, tc.config, "CREATE_USER"
+            )
+
         connector = ConnectorFactory.create_connector(
             template_slug=tc.template.slug,
-            config=tc.config
+            config=connector_config
         )
         
         # Create user in external system
@@ -397,9 +442,17 @@ class TenantConnectorService:
         logger.info(f"Deleting user {identity.name} (external_id: {identity.external_id}) via connector {tc.id}")
         
         # Resolve connector
+        # Use ApplicationConnectorService to build config for generic connectors
+        connector_config = tc.config
+        if not ConnectorFactory.is_specific_implementation(tc.template.slug):
+            logger.info("Building nested config for generic connector")
+            connector_config = ApplicationConnectorService.build_config_from_template(
+                tc.template, tc.config, "DELETE_USER"
+            )
+
         connector = ConnectorFactory.create_connector(
             template_slug=tc.template.slug,
-            config=tc.config
+            config=connector_config
         )
         
         # Delete user in external system
@@ -514,9 +567,17 @@ class TenantConnectorService:
         logger.info(f"Assigning role {role.name} to user {identity.name} via connector {tc.id}")
         
         # Resolve connector
+        # Use ApplicationConnectorService to build config for generic connectors
+        connector_config = tc.config
+        if not ConnectorFactory.is_specific_implementation(tc.template.slug):
+            logger.info("Building nested config for generic connector")
+            connector_config = ApplicationConnectorService.build_config_from_template(
+                tc.template, tc.config, "ASSIGN_ROLE"
+            )
+
         connector = ConnectorFactory.create_connector(
             template_slug=tc.template.slug,
-            config=tc.config
+            config=connector_config
         )
         
         # Assign role in external system

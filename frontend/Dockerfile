@@ -10,7 +10,11 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install dependencies
-RUN npm config set fetch-retry-maxtimeout 120000 && npm ci
+# Install dependencies with robust retry settings
+RUN npm config set fetch-retry-maxtimeout 600000 && \
+    npm config set fetch-retries 5 && \
+    npm config set fetch-retry-mintimeout 20000 && \
+    npm ci --no-audit
 
 # Copy source code
 COPY . .

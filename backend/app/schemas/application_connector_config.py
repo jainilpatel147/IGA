@@ -60,7 +60,7 @@ class ConnectionConfig(BaseModel):
 class EndpointConfig(BaseModel):
     operation: ConnectorOperation
     method: HttpMethod = Field(default=HttpMethod.GET)
-    path: str = Field(..., description="API path relative to base_url")
+    path: Optional[str] = Field(None, description="API path relative to base_url")
     headers: Dict[str, str] = Field(default_factory=dict)
     query_params: Dict[str, str] = Field(default_factory=dict)
     body_template: Optional[str] = Field(None, description="JSON body template with {{placeholders}}")

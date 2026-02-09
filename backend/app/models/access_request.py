@@ -57,13 +57,13 @@ class AccessRequest(Base):
     requester_identity_id = Column(
         UUID(as_uuid=True),
         ForeignKey("identities.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
         index=True
     )
     target_identity_id = Column(
         UUID(as_uuid=True),
         ForeignKey("identities.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
         index=True
     )
     
@@ -71,11 +71,12 @@ class AccessRequest(Base):
     role_id = Column(
         UUID(as_uuid=True),
         ForeignKey("roles.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
         index=True
     )
     
     # Request details
+    request_type = Column(String(50), default="ROLE_ACCESS", nullable=False)
     justification = Column(Text, nullable=True)
     status = Column(String(50), default=RequestStatus.PENDING.value, nullable=False)
     
